@@ -1,0 +1,76 @@
+#!/usr/bin/env node
+import { cmdInit } from "../src/commands/init.js";
+import { cmdScan } from "../src/commands/scan.js";
+import { cmdSync } from "../src/commands/sync.js";
+import { cmdIngest } from "../src/commands/ingest.js";
+import { cmdCommitIslands } from "../src/commands/commit-islands.js";
+import { cmdRender } from "../src/commands/render.js";
+import { cmdTree } from "../src/commands/tree.js";
+import { cmdMark } from "../src/commands/mark.js";
+import { cmdImplement } from "../src/commands/implement.js";
+import { cmdStatus } from "../src/commands/status.js";
+
+const HELP = `specforest — spec-driven feature forest
+
+Commands:
+  init                                       create config + folders
+  sync                                       orchestrator; emits "NEXT: …"
+  scan                                       read-only stale report (JSON)
+  ingest <spec-name>                         stdin: tree JSON
+  commit-islands                             stdin: islands JSON
+  render                                     regenerate forest.md + island MDs
+  tree [<spec-name>]                         ASCII tree (full forest, or one spec)
+  mark <spec>/<feature> <state>              set status: todo|in_progress|blocked|done
+  implement <spec>/<feature> [--no-mark]     guide implementation; mark in_progress
+  status                                     one-line counters per island
+
+Examples:
+  node .claude/skills/specforest/bin/cli.js init
+  node .claude/skills/specforest/bin/cli.js sync
+  echo '<tree-json>' | node .claude/skills/specforest/bin/cli.js ingest my-spec
+`;
+
+const HANDLERS = {
+  init: cmdInit,
+  scan: cmdScan,
+  sync: cmdSync,
+  ingest: cmdIngest,
+  "commit-islands": cmdCommitIslands,
+  render: cmdRender,
+  tree: cmdTree,
+  mark: cmdMark,
+  implement: cmdImplement,
+  status: cmdStatus,
+};
+
+async function main() {
+  const [, , cmd, ...rest] = process.argv;
+  if (!cmd || cmd === "--help" || cmd === "-h") {
+    process.stdout.write(HELP);
+    process.exit(0);
+  }
+  const handler = HANDLERS[cmd];
+  if (!handler) {
+    process.stderr.write(`unknown command: ${cmd}\n\n${HELP}`);
+    process.exit(1);
+  }
+  try {
+    const code = await handler({
+      cwd: process.cwd(),
+      args: rest,
+      stdin: process.stdin,
+      stdout: process.stdout,
+      stderr: process.stderr,
+    });
+    process.exit(code ?? 0);
+  } catch (e) {
+    if (e.code === "ENOENT_CONFIG") {
+      process.stderr.write(`${e.message}\n`);
+      process.exit(1);
+    }
+    process.stderr.write(`fatal: ${e.stack || e.message}\n`);
+    process.exit(1);
+  }
+}
+
+main();
