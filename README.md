@@ -51,16 +51,102 @@ After `init`, the host project will look like:
 
 ## Install
 
-The skill is self-contained under `.claude/skills/specforest/`. From the project root install its two runtime deps:
+Requires **Node >= 18**. The skill is self-contained — copy the directory into your project, install two runtime deps, done. No npm registry publish.
+
+### 1. Drop the skill into your project
+
+Pick one:
+
+```bash
+# Option A — clone the parent repo somewhere and copy the skill out
+git clone https://github.com/OrionisBio/furiosa.git /tmp/furiosa
+mkdir -p .claude/skills
+cp -r /tmp/furiosa/.claude/skills/specforest .claude/skills/
+
+# Option B — git subtree (keeps the skill updatable)
+git remote add specforest-upstream https://github.com/OrionisBio/furiosa.git
+git subtree add --prefix=.claude/skills/specforest specforest-upstream develop --squash -- .claude/skills/specforest
+
+# Option C — sparse checkout (only the skill, no rest of the repo)
+git clone --filter=blob:none --no-checkout https://github.com/OrionisBio/furiosa.git /tmp/furiosa
+git -C /tmp/furiosa sparse-checkout set .claude/skills/specforest
+git -C /tmp/furiosa checkout develop
+cp -r /tmp/furiosa/.claude/skills/specforest .claude/skills/
+```
+
+### 2. Install runtime deps
 
 ```bash
 cd .claude/skills/specforest
 npm install
+cd -
 ```
 
-That's it — no global install needed. The CLI is invoked via `node .claude/skills/specforest/bin/cli.js …` from the project root.
+### 3. Wire it into your agent tool
 
-Requires Node >= 18.
+The CLI works standalone — `node .claude/skills/specforest/bin/cli.js <command>` from project root is enough. The tool-specific steps below just make the agent **discover** the skill and drive the sync loop autonomously.
+
+#### Claude Code
+
+Already configured. Claude Code auto-discovers any `.claude/skills/<name>/SKILL.md` in the project. After step 1+2:
+
+```bash
+node .claude/skills/specforest/bin/cli.js init
+```
+
+Then in Claude Code, just say: `"sync the specforest"` or `"implement auth/login"`. Claude reads `SKILL.md` and drives the loop.
+
+To make it available across **all** your projects, copy to `~/.claude/skills/specforest/` instead.
+
+#### OpenCode (sst/opencode)
+
+OpenCode doesn't auto-discover Anthropic-style skills, but it reads `AGENTS.md` at the project root. Add a pointer:
+
+```markdown
+# AGENTS.md
+
+## specforest skill
+A spec-driven feature forest CLI lives at `.claude/skills/specforest/`.
+Read `.claude/skills/specforest/SKILL.md` before answering any user request
+involving specs, features, dependencies, or progress tracking.
+```
+
+Then `opencode` will pull the SKILL.md into context on demand.
+
+#### Cursor / Windsurf / Continue
+
+Add a project rule that points the agent at SKILL.md:
+
+```
+# .cursor/rules/specforest.md  (Cursor)
+# .windsurfrules                (Windsurf)
+# .continue/rules.md            (Continue)
+
+When the user asks about specs, features, dependencies, or wants to
+"sync the forest" / "implement X/Y", read
+`.claude/skills/specforest/SKILL.md` and follow its instructions.
+The CLI is at `.claude/skills/specforest/bin/cli.js`.
+```
+
+#### Aider, Codex CLI, or any other tool with no skills concept
+
+Just run the CLI manually and paste the embedded prompts into the agent yourself. `sync` prints exactly what the LLM needs to read and what to pipe back:
+
+```bash
+node .claude/skills/specforest/bin/cli.js sync
+# → emits a PROMPT block per stale spec; paste it into your chat,
+#   then pipe the LLM's tree JSON back through `ingest <spec-name>`.
+```
+
+The CLI is the contract — any LLM that can read a spec file and emit JSON can drive it.
+
+### 4. Gitignore the state dir
+
+```bash
+echo ".specforest/" >> .gitignore
+```
+
+(Or commit it deliberately — your call. Most teams gitignore it and treat the rendered `docs/trees/` MDs as the shareable artifact.)
 
 ---
 
