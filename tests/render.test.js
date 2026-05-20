@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, readFile, writeFile, mkdir, readdir } from "node:fs/promises";
+import { mkdtemp, rm, readFile, writeFile, mkdir, readdir, utimes } from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { defaultMarkers } from "../src/checkbox.js";
@@ -154,8 +154,9 @@ test("syncCheckboxes updates tree JSON from MD edits", async () => {
     await mkdir(outputDir, { recursive: true });
     const tree = sampleTree("auth", [feat("login", "todo", [feat("oidc", "todo")])]);
     await writeTree(treesDir, tree);
+    const mdPath = path.join(outputDir, "island.md");
     await writeFile(
-      path.join(outputDir, "island.md"),
+      mdPath,
       [
         "# island",
         "",
@@ -168,6 +169,8 @@ test("syncCheckboxes updates tree JSON from MD edits", async () => {
       ].join("\n"),
       "utf8",
     );
+    const future = new Date(Date.now() + 5000);
+    await utimes(mdPath, future, future);
     const r = await syncCheckboxes(outputDir, treesDir, defaultMarkers());
     assert.deepEqual(r.updated, ["auth"]);
     const raw = JSON.parse(await readFile(path.join(treesDir, "auth.json"), "utf8"));
