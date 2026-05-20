@@ -184,6 +184,7 @@ The `sync` command is idempotent and self-describing. Run it; it tells you what 
 | `status` | One-line per-island counters. |
 | `mark <spec>/<feature> <state>` | Set feature status: `todo` / `in_progress` / `blocked` / `done`. |
 | `implement <spec>/<feature> [--no-mark]` | Print specs-to-read + prerequisites + embedded prompt, and mark the target `in_progress`. |
+| `rehash [--dry-run]` | Resync `specHash` in state + trees to match on-disk bytes (no tree regen, no status touch). |
 
 ---
 
@@ -435,6 +436,7 @@ Tell Claude any of:
 - `"sync the specforest"` / `"update the forest"` / `/specforest`
 - `"show the forest"` / `/specforest-tree`
 - `"implement <spec>/<feature>"` / `/specforest-implement <spec>/<feature>`
+- `"rehash specforest"` / `/specforest-rehash` — resync hashes after byte-only spec edits (CRLF, BOM, formatting)
 
 Claude consults `.claude/skills/specforest/SKILL.md` and walks the sync loop. The CLI's `NEXT: …` markers and embedded prompts are the contract — Claude doesn't need to memorize the schema.
 

@@ -14,6 +14,7 @@ Turn project specs into a forest of feature trees, cluster features into depende
 - "implement \<spec\>/\<feature\>" / "let's build \<feature\>" / `/specforest-implement` → **Implement flow** (§ Implement).
 - User edited spec files and wants the trees current → **Sync flow**.
 - User ticked checkboxes in Obsidian and wants ASCII tree refreshed → run `tree` (it syncs checkboxes first).
+- "rehash specforest" / "resync hashes" / `/specforest-rehash` → **Rehash flow** (§ Rehash). Use when spec bytes changed but feature content did not (CRLF flip, BOM fix, reformatting).
 
 ## Invocation
 
@@ -153,6 +154,17 @@ User asks to implement `<spec>/<feature>`:
    node .claude/skills/specforest/bin/cli.js mark <spec>/<feature> blocked
    ```
    And explain to the user why.
+
+## Rehash flow
+
+Use when a spec's bytes changed but its features did NOT (line-ending normalization, BOM removal, reformatting). Patches `specHash` in `.specforest/state.json` and `.specforest/trees/*.json` to match on-disk bytes WITHOUT re-ingesting or touching trees, islands, or progress.
+
+```
+node .claude/skills/specforest/bin/cli.js rehash            # apply
+node .claude/skills/specforest/bin/cli.js rehash --dry-run  # report only
+```
+
+If features actually changed, use the Sync flow instead — `rehash` will not regenerate trees from new headings.
 
 ## Pitfalls + rules
 

@@ -9,6 +9,7 @@ import { cmdTree } from "../src/commands/tree.js";
 import { cmdMark } from "../src/commands/mark.js";
 import { cmdImplement } from "../src/commands/implement.js";
 import { cmdStatus } from "../src/commands/status.js";
+import { cmdRehash } from "../src/commands/rehash.js";
 
 const HELP = `specforest — spec-driven feature forest
 
@@ -23,6 +24,7 @@ Commands:
   mark <spec>/<feature> <state>              set status: todo|in_progress|blocked|done
   implement <spec>/<feature> [--no-mark]     guide implementation; mark in_progress
   status                                     one-line counters per island
+  rehash [--dry-run]                         resync specHash to on-disk bytes (no tree regen)
 
 Examples:
   node .claude/skills/specforest/bin/cli.js init
@@ -41,6 +43,7 @@ const HANDLERS = {
   mark: cmdMark,
   implement: cmdImplement,
   status: cmdStatus,
+  rehash: cmdRehash,
 };
 
 async function main() {
