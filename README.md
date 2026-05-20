@@ -1,5 +1,5 @@
 <h1 align="center">
-  <img src="assets/logo.png" alt="" width="280" /><br/>
+  <img src="assets/logo.png" alt="" width="360" /><br/>
   specforest
 </h1>
 
