@@ -1,6 +1,19 @@
-# specforest
+<h1 align="center">
+  <img src="assets/logo.png" alt="" width="280" /><br/>
+  specforest
+</h1>
 
-Turn project spec files into a forest of feature trees, cluster features into dependency islands, render Obsidian-friendly Markdown, and track per-feature progress with checkbox round-trips.
+<p align="center"><em>Turn spec files into a forest of feature trees with dependency islands and progress tracking.</em></p>
+
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"/></a>
+  <img src="https://img.shields.io/badge/node-%3E%3D18-brightgreen.svg" alt="Node >=18"/>
+  <img src="https://img.shields.io/badge/tests-72%20passing-brightgreen.svg" alt="72 tests passing"/>
+</p>
+
+---
+
+Render Obsidian-friendly Markdown, cluster features into dependency islands, and track per-feature progress with checkbox round-trips.
 
 A **hybrid CLI + LLM skill**:
 - The Node CLI does deterministic work: hashing, change detection, validation, ID reconciliation, rendering, locking.
