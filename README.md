@@ -193,7 +193,7 @@ The `sync` command is idempotent and self-describing. Run it; it tells you what 
 | `ingest <spec-name>` | Reads tree JSON from stdin, validates, stores under `.specforest/trees/`. |
 | `commit-islands` | Reads islands JSON from stdin, validates, reconciles IDs, writes `.specforest/islands.json`. |
 | `render` | Force regenerate `forest.md` + island MDs. |
-| `tree [<spec-name>]` | Print full forest as ASCII (or just one spec). Runs checkbox round-trip first. |
+| `tree [<spec-name>] [--regenerate] [--print]` | Default: emit `.specforest/tree.txt` cache path (read with your editor / Read tool, not bash). `<spec-name>` slices a single spec to stdout. `--print` dumps full ASCII to stdout. `--regenerate` forces rebuild. Cache auto-refreshes on mutations. |
 | `status` | One-line per-island counters. |
 | `mark <spec>/<feature> <state>` | Set feature status: `todo` / `in_progress` / `blocked` / `done`. |
 | `implement <spec>/<feature> [--no-mark]` | Print specs-to-read + prerequisites + embedded prompt, and mark the target `in_progress`. |
@@ -313,7 +313,23 @@ marked dashboard/widget-grid → done
 ### Inspect
 
 ```
+$ node .claude/skills/specforest/bin/cli.js status
+forest: 1 islands, [1/3]
+  auth-and-dashboard: [1/3] (2 specs)
+```
+
+`status` is the cheap overview. For full detail, `tree` emits the cache path so you (or Claude) can read the file directly instead of streaming ASCII through stdout:
+
+```
 $ node .claude/skills/specforest/bin/cli.js tree
+NEXT: read
+path: .specforest/tree.txt
+hint: run `specforest status` for island counters; pass --print to dump ASCII to stdout
+```
+
+`.specforest/tree.txt`:
+
+```
 forest [1/3]
 └── auth-and-dashboard [1/3]
     ├── auth
@@ -323,13 +339,7 @@ forest [1/3]
         └── [/] widget-grid
 ```
 
-```
-$ node .claude/skills/specforest/bin/cli.js status
-forest: 1 islands, [1/3]
-  auth-and-dashboard: [1/3] (2 specs)
-```
-
-`tree <spec-name>` narrows to a single spec subtree.
+`tree <spec-name>` narrows to a single spec subtree (sliced from the same cache, printed inline). `tree --print` dumps the full ASCII to stdout for debugging.
 
 ---
 

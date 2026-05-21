@@ -20,16 +20,24 @@ Commands:
   ingest <spec-name>                         stdin: tree JSON
   commit-islands                             stdin: islands JSON
   render                                     regenerate forest.md + island MDs
-  tree [<spec-name>]                         ASCII tree (full forest, or one spec)
-  mark <spec>/<feature> <state>              set status: todo|in_progress|blocked|done
-  implement <spec>/<feature> [--no-mark]     guide implementation; mark in_progress
+  tree [<spec-name>] [--regenerate] [--print]
+                                             default: emit cache path for Read; --print dumps ASCII; --regenerate forces rebuild
+  mark <spec>/<feature-path> <state>         set status: todo|in_progress|blocked|done
+  implement <spec>/<feature-path> [--no-mark] guide implementation; mark in_progress
   status                                     one-line counters per island
   rehash [--dry-run]                         resync specHash to on-disk bytes (no tree regen)
+
+Feature paths may target leaves (or any sub-feature):
+  <spec>/<top>/<sub>/.../<leaf>
+A single segment after the spec is resolved by name across the whole tree
+(ambiguities prompt or list candidates).
 
 Examples:
   node .claude/skills/specforest/bin/cli.js init
   node .claude/skills/specforest/bin/cli.js sync
   echo '<tree-json>' | node .claude/skills/specforest/bin/cli.js ingest my-spec
+  node .claude/skills/specforest/bin/cli.js implement auth-design/auth-frontend/login-screen
+  node .claude/skills/specforest/bin/cli.js mark auth-design/auth-frontend/login-screen done
 `;
 
 const HANDLERS = {

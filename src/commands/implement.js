@@ -1,25 +1,28 @@
-import path from "node:path";
 import { loadConfig } from "../config.js";
 import { paths } from "../paths.js";
 import { readIslands } from "../islands-io.js";
-import { readTree, readAllTrees, isSubFeatureName, findParentTopLevel, findTopLevelFeature, topLevelNames, writeTree } from "../tree-io.js";
+import { readTree, readAllTrees, findTopLevelFeature, writeTree } from "../tree-io.js";
 import { findIslandForFeature, buildAdjacency } from "../graph.js";
-import { closestMatch } from "../kebab.js";
 import { implementPrompt } from "../prompts.js";
 import { syncCheckboxesAndPersistOrphans } from "../sync-helpers.js";
+import { regenAndWriteTreeCache } from "../tree-cache.js";
+import { parseTarget, resolveTargetNode } from "../target.js";
+import { rollupAncestors } from "../rollup.js";
+import { pickMatch } from "../disambiguate.js";
 
-export async function cmdImplement({ cwd, args, stdout, stderr }) {
+export async function cmdImplement({ cwd, args, stdin, stdout, stderr }) {
   const target = args.find((a) => !a.startsWith("--"));
   const noMark = args.includes("--no-mark");
   if (!target) {
-    stderr.write("usage: specforest implement <spec>/<feature> [--no-mark]\n");
+    stderr.write("usage: specforest implement <spec>/<feature-path> [--no-mark]\n");
     return 1;
   }
-  const [specName, featureName] = target.split("/");
-  if (!specName || !featureName) {
-    stderr.write(`bad target: ${target}; expected <spec>/<feature>\n`);
+  const parsed = parseTarget(target);
+  if (parsed.error) {
+    stderr.write(`${parsed.error}\n`);
     return 1;
   }
+  const { spec: specName, segments } = parsed;
   const config = await loadConfig(cwd);
   const p = paths(cwd, config);
   await syncCheckboxesAndPersistOrphans({ outputDir: p.outputDir, treesDir: p.treesDir, statePath: p.state, markers: config.checkboxMarkers });
@@ -36,32 +39,37 @@ export async function cmdImplement({ cwd, args, stdout, stderr }) {
     return 1;
   }
 
-  const isSub = isSubFeatureName(ownTree, featureName);
-  if (isSub) {
-    const parent = findParentTopLevel(ownTree, featureName);
-    stderr.write(`"${featureName}" is a sub-feature; implement its parent top-level feature${parent ? ` "${specName}/${parent}"` : ""}\n`);
+  let resolved = resolveTargetNode(ownTree, segments);
+  if (resolved.error) {
+    stderr.write(`${resolved.error}\n`);
+    return 1;
+  }
+  if (resolved.ambiguous) {
+    const picked = await pickMatch({ spec: specName, name: segments[segments.length - 1], matches: resolved.matches, stdin, stdout, stderr });
+    if (!picked) {
+      stderr.write(`aborted: ambiguous target\n`);
+      return 1;
+    }
+    resolved = picked;
+  }
+
+  const targetNode = resolved.node;
+  const topLevel = resolved.topLevel;
+  const fullPath = resolved.fullPath;
+
+  if (targetNode.status === "done") {
+    stderr.write(`feature already done; run \`specforest mark ${specName}/${fullPath} todo\` first to reopen\n`);
     return 1;
   }
 
-  const ownFeature = findTopLevelFeature(ownTree, featureName);
-  if (!ownFeature) {
-    const hint = closestMatch(featureName, topLevelNames(ownTree));
-    stderr.write(`feature not found: ${specName}/${featureName}${hint ? `. did you mean "${specName}/${hint}"?` : ""}\n`);
-    return 1;
-  }
-  if (ownFeature.status === "done") {
-    stderr.write(`feature already done; run \`specforest mark ${specName}/${featureName} todo\` first to reopen\n`);
-    return 1;
-  }
-
-  const island = findIslandForFeature(islands.islands, specName, featureName);
+  const island = findIslandForFeature(islands.islands, specName, topLevel.name);
   if (!island) {
     stderr.write(`feature not present in any island (islands.json out of date?). run \`specforest sync\` first\n`);
     return 1;
   }
 
   const adj = buildAdjacency(island);
-  const startKey = `${specName}/${featureName}`;
+  const startKey = `${specName}/${topLevel.name}`;
   const visited = new Set();
   const reachedOrder = [];
   const cycleNotes = [];
@@ -94,16 +102,17 @@ export async function cmdImplement({ cwd, args, stdout, stderr }) {
     prerequisites.push({ spec: s, feature: f, status: node ? node.status : "unknown" });
   }
 
-  const hasUndone = prerequisites.some((p) => p.status !== "done");
+  const hasUndone = prerequisites.some((pr) => pr.status !== "done");
   const specsToRead = [...specsToReadSet];
 
+  const fullTarget = `${specName}/${fullPath}`;
   const lines = [];
   lines.push("NEXT: implement");
-  lines.push(`target: ${specName}/${featureName}`);
+  lines.push(`target: ${fullTarget}`);
   if (!noMark) {
-    lines.push(`target-status: ${ownFeature.status} → in_progress`);
+    lines.push(`target-status: ${targetNode.status} → in_progress`);
   } else {
-    lines.push(`target-status: ${ownFeature.status} (unchanged, --no-mark)`);
+    lines.push(`target-status: ${targetNode.status} (unchanged, --no-mark)`);
   }
   lines.push("specs-to-read:");
   for (const s of specsToRead) lines.push(`  - ${s}`);
@@ -121,18 +130,24 @@ export async function cmdImplement({ cwd, args, stdout, stderr }) {
   }
   lines.push("prompt: |");
   const prompt = implementPrompt({
-    target: `${specName}/${featureName}`,
+    target: fullTarget,
     specsToRead,
     prerequisites,
     hasUndonePrereqs: hasUndone,
   });
   for (const ln of prompt.split("\n")) lines.push(`  ${ln}`);
 
-  stdout.write(lines.join("\n") + "\n");
-
-  if (!noMark && ownFeature.status !== "in_progress") {
-    ownFeature.status = "in_progress";
+  let rolled = [];
+  if (!noMark && targetNode.status !== "in_progress") {
+    targetNode.status = "in_progress";
+    rolled = rollupAncestors(ownTree, targetNode);
     await writeTree(p.treesDir, ownTree);
+    try { await regenAndWriteTreeCache({ config, p }); } catch {}
+  }
+
+  stdout.write(lines.join("\n") + "\n");
+  for (const r of rolled) {
+    stdout.write(`rollup: ${specName}/${r.name} ${r.from} → ${r.to}\n`);
   }
 
   return 0;

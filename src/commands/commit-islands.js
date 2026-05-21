@@ -5,6 +5,7 @@ import { readIslands, writeIslands, reconcileIds } from "../islands-io.js";
 import { readAllTrees, structuralFingerprint } from "../tree-io.js";
 import { syncCheckboxesAndPersistOrphans } from "../sync-helpers.js";
 import { updateState } from "../state.js";
+import { regenAndWriteTreeCache } from "../tree-cache.js";
 
 async function readAllStdin(stdin) {
   const chunks = [];
@@ -80,6 +81,7 @@ export async function cmdCommitIslands({ cwd, stdin, stdout, stderr }) {
   await writeIslands(p.islands, out);
   const structHash = structuralFingerprint(trees);
   await updateState(p.state, (s) => { s.lastClusteredStructure = structHash; });
+  try { await regenAndWriteTreeCache({ config, p }); } catch {}
   stdout.write(`committed ${reconciled.length} island(s); covered ${memberKeys.length} top-level features\n`);
   return 0;
 }

@@ -10,7 +10,7 @@ Turn project specs into a forest of feature trees, cluster features into depende
 ## When to invoke
 
 - "sync specforest" / "update the forest" / "rebuild the trees" / `/specforest` → **Sync flow** (§ Sync).
-- "show the forest" / "what's in the forest" / `/specforest-tree` → run `tree` or `status`, do not write.
+- "show the forest" / "what's in the forest" / `/specforest-tree` → **Tree-view flow** (§ Tree view). Do not write. Pass `--regenerate` to force rebuild.
 - "implement \<spec\>/\<feature\>" / "let's build \<feature\>" / `/specforest-implement` → **Implement flow** (§ Implement).
 - User edited spec files and wants the trees current → **Sync flow**.
 - User ticked checkboxes in Obsidian and wants ASCII tree refreshed → run `tree` (it syncs checkboxes first).
@@ -154,6 +154,24 @@ User asks to implement `<spec>/<feature>`:
    node .claude/skills/specforest/bin/cli.js mark <spec>/<feature> blocked
    ```
    And explain to the user why.
+
+## Tree view
+
+`tree` does NOT dump the full forest to stdout by default — it would balloon Claude's context. Instead:
+
+1. Run `status` first → one line per island with counters. Cheap orientation.
+2. Need full detail? Run `tree`. Output is 3 lines:
+   ```
+   NEXT: read
+   path: .specforest/tree.txt
+   hint: run `specforest status` for island counters; pass --print to dump ASCII to stdout
+   ```
+   Use the **Read tool** on `path:` — do NOT `cat`/`type` it through bash (the cache can be huge).
+3. Narrow drill-down: `tree <spec-name>` — sliced from cache, prints inline (small, safe).
+4. Force rebuild: `tree --regenerate`.
+5. Legacy stdout dump (debugging only): `tree --print`.
+
+The cache (`.specforest/tree.txt`) is rewritten automatically by `sync` (after render), `mark`, `implement`, and `commit-islands`. `tree` regenerates it on demand if stale.
 
 ## Rehash flow
 

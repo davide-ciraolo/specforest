@@ -15,6 +15,7 @@ export function paths(projectRoot, config) {
     archiveIslands: path.join(hidden, "archive", "islands"),
     lock: path.join(hidden, "sync.lock"),
     forestMd: path.join(projectRoot, config.outputDir, "forest.md"),
+    treeCache: path.join(hidden, "tree.txt"),
   };
 }
 

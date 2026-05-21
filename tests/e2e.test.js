@@ -307,7 +307,7 @@ test("implement --no-mark leaves status untouched", async () => {
   assert.equal(wg.status, "todo");
 });
 
-test("implement rejects sub-features with hint about parent", async () => {
+test("implement accepts sub-feature by single name and marks only the leaf in_progress", async () => {
   const root = await setupProject();
   await writeSpec(root, "auth", "## login\n");
   const tree = {
@@ -334,9 +334,161 @@ test("implement rejects sub-features with hint about parent", async () => {
   });
 
   const r = await run(["implement", "auth/remember-me"], { cwd: root });
+  assert.equal(r.code, 0, r.stderr);
+  assert.match(r.stdout, /target: auth\/login\/remember-me/);
+
+  const out = JSON.parse(await readFile(path.join(root, ".specforest", "trees", "auth.json"), "utf8"));
+  const login = out.features.find((f) => f.name === "login");
+  const rm = login.children.find((c) => c.name === "remember-me");
+  assert.equal(rm.status, "in_progress");
+  assert.equal(login.status, "in_progress", "parent should roll up to in_progress");
+});
+
+test("implement accepts full leaf path and rolls up ancestors", async () => {
+  const root = await setupProject();
+  await writeSpec(root, "auth", "## auth-frontend\n");
+  const tree = {
+    spec: "auth",
+    features: [
+      {
+        name: "auth-frontend",
+        source: "heading",
+        originalHeading: "## auth-frontend",
+        status: "todo",
+        children: [
+          { name: "login-screen", source: "implied", originalHeading: null, status: "todo", children: [] },
+          { name: "admin-ui", source: "implied", originalHeading: null, status: "todo", children: [] },
+        ],
+      },
+    ],
+  };
+  await run(["ingest", "auth"], { cwd: root, input: JSON.stringify(tree) });
+  await run(["commit-islands"], {
+    cwd: root,
+    input: JSON.stringify({
+      generatedAt: "2026-05-18T00:00:00Z",
+      islands: [{ id: "isl_aaaaaa", name: "auth", members: [{ spec: "auth", feature: "auth-frontend" }], dependencies: [] }],
+    }),
+  });
+
+  const r = await run(["implement", "auth/auth-frontend/login-screen"], { cwd: root });
+  assert.equal(r.code, 0, r.stderr);
+  assert.match(r.stdout, /target: auth\/auth-frontend\/login-screen/);
+
+  const out = JSON.parse(await readFile(path.join(root, ".specforest", "trees", "auth.json"), "utf8"));
+  const af = out.features.find((f) => f.name === "auth-frontend");
+  const ls = af.children.find((c) => c.name === "login-screen");
+  assert.equal(ls.status, "in_progress");
+  assert.equal(af.status, "in_progress");
+});
+
+test("mark on leaf rolls up parent: all-done → done, mixed → in_progress, any-blocked → blocked", async () => {
+  const root = await setupProject();
+  await writeSpec(root, "auth", "## auth-frontend\n");
+  const tree = {
+    spec: "auth",
+    features: [
+      {
+        name: "auth-frontend",
+        source: "heading",
+        originalHeading: "## auth-frontend",
+        status: "todo",
+        children: [
+          { name: "login-screen", source: "implied", originalHeading: null, status: "todo", children: [] },
+          { name: "admin-ui", source: "implied", originalHeading: null, status: "todo", children: [] },
+        ],
+      },
+    ],
+  };
+  await run(["ingest", "auth"], { cwd: root, input: JSON.stringify(tree) });
+  await run(["commit-islands"], {
+    cwd: root,
+    input: JSON.stringify({
+      generatedAt: "2026-05-18T00:00:00Z",
+      islands: [{ id: "isl_aaaaaa", name: "auth", members: [{ spec: "auth", feature: "auth-frontend" }], dependencies: [] }],
+    }),
+  });
+
+  // one done → parent in_progress
+  let r = await run(["mark", "auth/auth-frontend/login-screen", "done"], { cwd: root });
+  assert.equal(r.code, 0, r.stderr);
+  let out = JSON.parse(await readFile(path.join(root, ".specforest", "trees", "auth.json"), "utf8"));
+  let af = out.features.find((f) => f.name === "auth-frontend");
+  assert.equal(af.status, "in_progress");
+
+  // all done → parent done
+  r = await run(["mark", "auth/auth-frontend/admin-ui", "done"], { cwd: root });
+  assert.equal(r.code, 0, r.stderr);
+  out = JSON.parse(await readFile(path.join(root, ".specforest", "trees", "auth.json"), "utf8"));
+  af = out.features.find((f) => f.name === "auth-frontend");
+  assert.equal(af.status, "done");
+
+  // one blocked → parent blocked (overrides done)
+  r = await run(["mark", "auth/auth-frontend/login-screen", "blocked"], { cwd: root });
+  assert.equal(r.code, 0, r.stderr);
+  out = JSON.parse(await readFile(path.join(root, ".specforest", "trees", "auth.json"), "utf8"));
+  af = out.features.find((f) => f.name === "auth-frontend");
+  assert.equal(af.status, "blocked");
+});
+
+test("mark with invalid sub-path returns hint", async () => {
+  const root = await setupProject();
+  await writeSpec(root, "auth", "## login\n");
+  const tree = {
+    spec: "auth",
+    features: [
+      {
+        name: "login",
+        source: "heading",
+        originalHeading: "## login",
+        status: "todo",
+        children: [
+          { name: "remember-me", source: "implied", originalHeading: null, status: "todo", children: [] },
+        ],
+      },
+    ],
+  };
+  await run(["ingest", "auth"], { cwd: root, input: JSON.stringify(tree) });
+
+  const r = await run(["mark", "auth/login/rmember-me", "done"], { cwd: root });
   assert.equal(r.code, 1);
-  assert.match(r.stderr, /sub-feature/);
-  assert.match(r.stderr, /"auth\/login"/);
+  assert.match(r.stderr, /path not found/);
+  assert.match(r.stderr, /did you mean "auth\/login\/remember-me"/);
+});
+
+test("ambiguous single-name target errors in non-TTY with list", async () => {
+  const root = await setupProject();
+  await writeSpec(root, "auth", "## a\n## b\n");
+  const tree = {
+    spec: "auth",
+    features: [
+      {
+        name: "a",
+        source: "heading",
+        originalHeading: "## a",
+        status: "todo",
+        children: [
+          { name: "dup", source: "implied", originalHeading: null, status: "todo", children: [] },
+        ],
+      },
+      {
+        name: "b",
+        source: "heading",
+        originalHeading: "## b",
+        status: "todo",
+        children: [
+          { name: "dup", source: "implied", originalHeading: null, status: "todo", children: [] },
+        ],
+      },
+    ],
+  };
+  await run(["ingest", "auth"], { cwd: root, input: JSON.stringify(tree) });
+
+  const r = await run(["mark", "auth/dup", "done"], { cwd: root });
+  assert.equal(r.code, 1);
+  assert.match(r.stderr, /ambiguous/);
+  assert.match(r.stderr, /auth\/a\/dup/);
+  assert.match(r.stderr, /auth\/b\/dup/);
 });
 
 test("status prints island counters", async () => {

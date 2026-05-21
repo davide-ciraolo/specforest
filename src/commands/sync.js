@@ -8,6 +8,7 @@ import { syncCheckboxesAndPersistOrphans } from "../sync-helpers.js";
 import { updateState, readState } from "../state.js";
 import { ingestPrompt, islandsPrompt } from "../prompts.js";
 import { acquireLock, releaseLock } from "../lock.js";
+import { regenAndWriteTreeCache } from "../tree-cache.js";
 
 async function mtimeMs(p) {
   try {
@@ -141,6 +142,7 @@ export async function cmdSync({ cwd, stdout, stderr }) {
         }
         s.islandIdMap = map;
       });
+      try { await regenAndWriteTreeCache({ config: scan.config, p: scan.paths }); } catch {}
       stdout.write(`rendered: forest.md + ${islands.islands.length} island MD(s) at ${scan.paths.outputDir}\n`);
       return 0;
     }
