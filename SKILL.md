@@ -1,6 +1,6 @@
 ---
 name: specforest
-description: Build, maintain, and consume a feature-tree forest with dependency islands and progress tracking from project specs. Trigger when the user says "sync specforest" / "update the forest" / "show the forest" / "implement <feature>" / "build the forest" / "/specforest" / "/specforest-implement <spec>/<feature>".
+description: Build, maintain, and consume a feature-tree forest with dependency islands and progress tracking from project specs. Trigger when the user says "sync specforest" / "update the forest" / "show the forest" / "implement <feature>" / "verify <feature>" / "is <feature> already implemented?" / "build the forest" / "add an island" / "add a new island" / "extend an island" / "re-cluster islands" / "/specforest" / "/specforest-implement <spec>/<feature>" / "/specforest-verify <spec>/<feature>" / "/specforest-add-island" / "/specforest-extend-island" / "/specforest-recluster".
 ---
 
 # Specforest Skill
@@ -9,9 +9,13 @@ Turn project specs into a forest of feature trees, cluster features into depende
 
 ## When to invoke
 
-- "sync specforest" / "update the forest" / "rebuild the trees" / `/specforest` → **Sync flow** (§ Sync).
+- "sync specforest" / "update the forest" / "rebuild the trees" / `/specforest` → **Sync flow** (§ Sync). Sync is incremental by default — existing islands are preserved.
+- "re-cluster islands" / "rebuild islands from scratch" / `/specforest-recluster` → **Sync flow** with `--recluster-islands` (forces a full re-cluster via `commit-islands`). Use when features need to move between islands or when new cross-island edges are required.
+- "add a new island" / "/specforest-add-island" → **Add-island flow** (§ Add island). Append ONE new island; existing islands stay byte-identical.
+- "extend an island" / "add feature to <island>" / "/specforest-extend-island" → **Extend-island flow** (§ Extend island). Append members (and intra-island deps) to ONE existing island.
 - "show the forest" / "what's in the forest" / `/specforest-tree` → **Tree-view flow** (§ Tree view). Do not write. Pass `--regenerate` to force rebuild.
 - "implement \<spec\>/\<feature\>" / "let's build \<feature\>" / `/specforest-implement` → **Implement flow** (§ Implement).
+- "verify \<spec\>/\<feature\>" / "is \<feature\> already implemented?" / "check if \<feature\> is done" / `/specforest-verify` → **Verify flow** (§ Verify).
 - User edited spec files and wants the trees current → **Sync flow**.
 - User ticked checkboxes in Obsidian and wants ASCII tree refreshed → run `tree` (it syncs checkboxes first).
 - "rehash specforest" / "resync hashes" / `/specforest-rehash` → **Rehash flow** (§ Rehash). Use when spec bytes changed but feature content did not (CRLF flip, BOM fix, reformatting).
@@ -30,12 +34,18 @@ If you get `ENOENT_CONFIG` or "not found", run `init` first.
 
 Loop until you read `NEXT: clean`:
 
-1. Run `node .claude/skills/specforest/bin/cli.js sync`.
+1. Run `node .claude/skills/specforest/bin/cli.js sync` (add `--recluster-islands` if the user explicitly asked for a full re-cluster, or if cross-island moves / edges are needed).
 2. Read stdout. Branch:
    - `NEXT: ingest` → see § Ingest step.
-   - `NEXT: islands` → see § Islands step.
+   - `NEXT: islands` → full re-cluster requested or first run; see § Islands step.
+   - `NEXT: incremental-islands` → existing islands kept; only new top-level features need placement. See § Incremental islands step.
    - `rendered: …` → render just happened. Re-run `sync` once more to confirm `NEXT: clean`.
    - `NEXT: clean` → done.
+
+**Decision rule for `--recluster-islands`:**
+- Default = incremental. Existing islands are preserved byte-for-byte; new top-level features are appended either to an existing island (`extend-island`) or as a new island (`add-island`).
+- Pass `--recluster-islands` only when (a) the user explicitly asks, (b) features must move between islands, or (c) the new work introduces cross-island edges that can't be modelled by extension. If unsure, prefer incremental first; the CLI will tell you to re-run with the flag if the incremental flow can't satisfy the change.
+- The CLI auto-falls-back to the full-cluster path when `islands.json` is absent.
 
 ### Ingest step
 
@@ -129,6 +139,72 @@ You:
 >
 > Don't reference sub-features in `members` or `dependencies`. CLI re-uses prior island IDs based on largest member-set overlap; you may assign placeholder IDs.
 
+### Incremental islands step
+
+When sync emits `NEXT: incremental-islands` the existing `islands.json` is preserved. The CLI prints:
+- Auto-prune notice (if it dropped orphaned members — features deleted from specs).
+- The full existing-island summary (id, name, member count + first few members).
+- The list of `uncovered top-level features` (newly added or renamed features needing placement).
+- All tree JSON paths + the islands.json path.
+- An embedded PROMPT block.
+
+You:
+
+1. Read `.specforest/islands.json` (full island detail) and every listed tree JSON.
+2. Apply the embedded prompt verbatim.
+3. For EACH uncovered feature, decide:
+   - **(a) Extend** an existing island when the feature thematically belongs there:
+     ```
+     echo '{"addMembers":[{"spec":"...","feature":"..."}],"addDependencies":[...]}' | \
+       node .claude/skills/specforest/bin/cli.js extend-island <id-or-name>
+     ```
+     Dependencies must stay WITHIN the target island.
+   - **(b) Add a new island** when the feature is its own theme (or groups with other uncovered features):
+     ```
+     echo '{"name":"kebab-theme","members":[...],"dependencies":[...]}' | \
+       node .claude/skills/specforest/bin/cli.js add-island
+     ```
+     The new island's members must not overlap any existing island.
+4. If the work needs cross-island edges or member moves → abort the incremental flow and re-run `sync --recluster-islands` instead.
+5. After all uncovered features are placed, re-run `sync` to render.
+
+**Orphan auto-prune:** When a feature is deleted from a spec, the next sync drops it from any island that referenced it (members + edges). Empty islands are dropped silently. The notice in the stdout header lists what was pruned.
+
+**Renames:** appear as `orphan + uncovered` because the prune drops the old name while the new name shows up uncovered. Reassign the new name back into the same island via `extend-island` to keep continuity.
+
+## Add island
+
+Standalone, additive: append ONE new island. Existing islands stay byte-identical.
+
+Stdin schema (single object — NOT wrapped in `{islands:[...]}`):
+
+```json
+{
+  "name": "kebab-theme",
+  "members": [ { "spec": "...", "feature": "..." } ],
+  "dependencies": [
+    { "from": {...}, "to": {...}, "kind": "explicit-ref" | "semantic", "reason": "..." }
+  ]
+}
+```
+
+```
+echo '<single-island-json>' | node .claude/skills/specforest/bin/cli.js add-island
+```
+
+Rejected if: member already in another island, member references unknown feature, dependencies cross island boundary, id/name collide with an existing island. The `id` is auto-generated if omitted.
+
+## Extend island
+
+Standalone, additive: append members (and intra-island dependencies) to ONE existing island. All other islands stay byte-identical.
+
+```
+echo '{"addMembers":[...],"addDependencies":[...]}' | \
+  node .claude/skills/specforest/bin/cli.js extend-island <id-or-name>
+```
+
+Rejected if: target island not found, member already in any island, member references unknown feature, dependency endpoint outside the target island after extension. For cross-island moves or edges, re-run `sync --recluster-islands`.
+
 ## Implement flow
 
 User asks to implement `<spec>/<feature>`:
@@ -154,6 +230,29 @@ User asks to implement `<spec>/<feature>`:
    node .claude/skills/specforest/bin/cli.js mark <spec>/<feature> blocked
    ```
    And explain to the user why.
+
+## Verify flow
+
+User asks to verify `<spec>/<feature>` — i.e. check whether it is already implemented in the codebase.
+
+1. Run:
+   ```
+   node .claude/skills/specforest/bin/cli.js verify <spec>/<feature>
+   ```
+   Accepts any current status (`todo` / `in_progress` / `blocked` / `done`). The command is **read-only** — it never mutates feature status.
+2. Read the `NEXT: verify` block. It lists:
+   - `target-status`: the current status, annotated `(no change)`.
+   - `specs-to-read`: full file paths. Read EVERY ONE in full (not excerpts).
+   - `prerequisites`: each with its current status. Some may be `⚠ not done`.
+   - `prompt`: embedded instructions.
+3. If any prerequisite is `⚠ not done`: surface the list to the user before continuing — the target may not be verifiable in isolation.
+4. Inspect the codebase for evidence the feature is implemented using **Grep / Glob / Read only — never edits**:
+   - Code paths, file structure, tests, configuration, migrations as the spec demands.
+5. Report back to the user with **VERDICT** (implemented | partially implemented | not implemented), **EVIDENCE** (concrete file paths + line numbers), and **GAPS** (anything missing).
+6. Suggest the matching follow-up `mark` command. Do NOT run `mark` yourself — the user (or the conversation) confirms first:
+   ```
+   node .claude/skills/specforest/bin/cli.js mark <spec>/<feature> <done|in_progress|todo|blocked>
+   ```
 
 ## Tree view
 
@@ -187,11 +286,14 @@ If features actually changed, use the Sync flow instead — `rehash` will not re
 ## Pitfalls + rules
 
 - **Never ingest a sub-feature directly.** Top-level features only as nodes; sub-features live under them. The Islands prompt hoists sub-feature edges to their parent.
-- **JSON via stdin only.** Never write tree JSON or islands JSON to disk yourself — always pipe through `ingest` / `commit-islands` so the CLI can validate, archive, and reconcile IDs.
+- **JSON via stdin only.** Never write tree JSON or islands JSON to disk yourself — always pipe through `ingest` / `commit-islands` / `add-island` / `extend-island` so the CLI can validate, archive, and reconcile IDs.
+- **Default sync is incremental.** Only pass `--recluster-islands` when the user explicitly asks, or when the change genuinely needs cross-island moves / edges. Re-clustering shuffles island IDs (reconciled by member-overlap) and is more disruptive — prefer `add-island` / `extend-island` for everyday additions.
+- **Cross-island edges are blocked from `add-island` / `extend-island`.** If a new feature has a dep crossing an existing island boundary, request `sync --recluster-islands` instead.
 - **CLI overwrites `specHash` and `specPath`.** Don't waste tokens computing them.
 - **`status` must be `"todo"` on ingest.** The CLI preserves prior status by name-match. Don't carry status across renames in your JSON — the CLI handles this and stashes lost progress in `orphanedProgress`.
 - **Spec name collisions error out.** If two files yield the same kebab name, the CLI exits non-zero with both paths; user resolves by renaming.
 - **`implement` already marks `in_progress`.** Don't double-mark unless the user passes `--no-mark`.
+- **`verify` is read-only.** It never writes status. After reporting the verdict, suggest the appropriate `mark` follow-up; only run `mark` once the user confirms.
 - **Wholesale regen.** `forest.md` and island MDs are projections of the JSON state. Never hand-edit them — your edits will be overwritten on next render. To edit progress: tick checkboxes (Obsidian-style markers; CLI parses them back).
 - **Don't paraphrase the embedded prompts.** Use the CLI's printed prompt verbatim; this SKILL.md's prompt section is a reference, the CLI's stdout is the source of truth for any given run.
 

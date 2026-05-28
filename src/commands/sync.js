@@ -2,11 +2,11 @@ import { stat, mkdir } from "node:fs/promises";
 import path from "node:path";
 import { computeScan } from "./scan.js";
 import { archiveTree, listTreeFiles, readAllTrees, structuralFingerprint } from "../tree-io.js";
-import { readIslands } from "../islands-io.js";
+import { readIslands, writeIslands } from "../islands-io.js";
 import { writeRenderedOutputs } from "../render.js";
 import { syncCheckboxesAndPersistOrphans } from "../sync-helpers.js";
 import { updateState, readState } from "../state.js";
-import { ingestPrompt, islandsPrompt } from "../prompts.js";
+import { ingestPrompt, islandsPrompt, incrementalIslandsPrompt } from "../prompts.js";
 import { acquireLock, releaseLock } from "../lock.js";
 import { regenAndWriteTreeCache } from "../tree-cache.js";
 
@@ -20,7 +20,10 @@ async function mtimeMs(p) {
   }
 }
 
-export async function cmdSync({ cwd, stdout, stderr }) {
+export async function cmdSync({ cwd, args, stdout, stderr }) {
+  const argv = args || [];
+  const reclusterFlag = argv.includes("--recluster-islands");
+
   const scan = await computeScan({ cwd });
   if (scan.collisions.length) {
     stderr.write("ERROR: spec name collisions:\n");
@@ -76,20 +79,19 @@ export async function cmdSync({ cwd, stdout, stderr }) {
     }
 
     const treeFiles = await listTreeFiles(scan.paths.treesDir);
-    const islandsMt = await mtimeMs(scan.paths.islands);
-    const stateForCluster = await readState(scan.paths.state);
+    let islandsMt = await mtimeMs(scan.paths.islands);
     const currentTrees = await readAllTrees(scan.paths.treesDir);
     const currentStructHash = structuralFingerprint(currentTrees);
-    const structuralChanged = stateForCluster.lastClusteredStructure !== currentStructHash;
-    const needsIslands = !islandsMt || deletedAny || structuralChanged;
 
-    if (needsIslands) {
+    // ---- Full re-cluster path: no islands yet OR explicit --recluster-islands flag.
+    if (!islandsMt || reclusterFlag) {
       if (treeFiles.length === 0) {
         stdout.write("NEXT: clean\nno specs / no trees — nothing to cluster\n");
         await updateState(scan.paths.state, (s) => { s.lastSync = new Date().toISOString(); });
         return 0;
       }
       const lines = ["NEXT: islands"];
+      if (reclusterFlag) lines.push("(mode: full re-cluster — --recluster-islands)");
       lines.push(`trees: ${treeFiles.length}`);
       for (const f of treeFiles) lines.push(`  - ${path.relative(cwd, f)}`);
       lines.push("");
@@ -104,9 +106,101 @@ export async function cmdSync({ cwd, stdout, stderr }) {
       return 0;
     }
 
+    // ---- Incremental path: islands.json exists, preserve it.
+    const knownFeatures = new Set();
+    for (const t of currentTrees) for (const f of t.features) knownFeatures.add(`${t.spec}/${f.name}`);
+
+    const existingIslands = await readIslands(scan.paths.islands);
+    // existingIslands is non-null here (islandsMt was truthy).
+
+    const coveredKeys = new Set();
+    for (const isl of existingIslands.islands) {
+      for (const m of isl.members) coveredKeys.add(`${m.spec}/${m.feature}`);
+    }
+
+    const orphanedKeys = new Set([...coveredKeys].filter((k) => !knownFeatures.has(k)));
+
+    // Auto-prune orphaned members + empty islands. Dependencies that point to
+    // orphaned members are dropped as well.
+    let prunedSomething = false;
+    let prunedEmptyIslands = [];
+    if (orphanedKeys.size > 0) {
+      const newIslands = [];
+      for (const isl of existingIslands.islands) {
+        const newMembers = isl.members.filter((m) => !orphanedKeys.has(`${m.spec}/${m.feature}`));
+        if (newMembers.length === 0) {
+          prunedEmptyIslands.push({ id: isl.id, name: isl.name });
+          continue;
+        }
+        const newDeps = isl.dependencies.filter(
+          (d) =>
+            !orphanedKeys.has(`${d.from.spec}/${d.from.feature}`) &&
+            !orphanedKeys.has(`${d.to.spec}/${d.to.feature}`),
+        );
+        newIslands.push({ ...isl, members: newMembers, dependencies: newDeps });
+      }
+      const pruned = { generatedAt: new Date().toISOString(), islands: newIslands };
+      await writeIslands(scan.paths.islands, pruned);
+      islandsMt = await mtimeMs(scan.paths.islands);
+      existingIslands.islands = newIslands;
+      prunedSomething = true;
+    }
+
+    // Recompute uncovered AFTER prune (covered may have shrunk; known features
+    // didn't change — orphan removal only drops dead members).
+    const coveredAfter = new Set();
+    for (const isl of existingIslands.islands) {
+      for (const m of isl.members) coveredAfter.add(`${m.spec}/${m.feature}`);
+    }
+    const uncoveredFeatures = [...knownFeatures].filter((k) => !coveredAfter.has(k));
+
+    if (uncoveredFeatures.length > 0) {
+      const islandsRel = path.relative(cwd, scan.paths.islands);
+      const lines = ["NEXT: incremental-islands"];
+      if (prunedSomething) {
+        lines.push(`auto-pruned ${orphanedKeys.size} orphan member(s) from existing islands`);
+        if (prunedEmptyIslands.length) {
+          lines.push(`dropped empty island(s): ${prunedEmptyIslands.map((i) => `${i.name}/${i.id}`).join(", ")}`);
+        }
+      }
+      lines.push(`existing islands: ${existingIslands.islands.length}`);
+      lines.push(`uncovered top-level features: ${uncoveredFeatures.length}`);
+      for (const k of uncoveredFeatures) lines.push(`  - ${k}`);
+      lines.push("");
+      lines.push("For each uncovered feature, pipe ONE of:");
+      lines.push("  - extend-island <id-or-name>   (add to an existing island, intra-island deps only)");
+      lines.push("  - add-island                    (create a NEW island; existing islands stay byte-identical)");
+      lines.push("Cross-island edges or member moves require: sync --recluster-islands");
+      lines.push("");
+      lines.push("PROMPT:");
+      lines.push("--- begin prompt ---");
+      lines.push(
+        incrementalIslandsPrompt({
+          existingIslands: existingIslands.islands,
+          uncoveredFeatures,
+          treePaths: treeFiles.map((f) => path.relative(cwd, f)),
+          islandsPath: islandsRel,
+        }),
+      );
+      lines.push("--- end prompt ---");
+      stdout.write(lines.join("\n") + "\n");
+      return 0;
+    }
+
+    // Coverage is complete. Bump the structural fingerprint if needed — this
+    // represents "current islands.json matches current tree structure" without
+    // requiring a full commit-islands run.
+    const stateNow = await readState(scan.paths.state);
+    if (stateNow.lastClusteredStructure !== currentStructHash) {
+      await updateState(scan.paths.state, (s) => {
+        s.lastClusteredStructure = currentStructHash;
+      });
+    }
+
+    // ---- Render path (unchanged in shape; honours pruned mtime).
     const state = await readState(scan.paths.state);
     const forestMt = await mtimeMs(scan.paths.forestMd);
-    let needsRender = !forestMt;
+    let needsRender = !forestMt || prunedSomething || deletedAny;
     if (!needsRender) {
       if (islandsMt && islandsMt > (state.lastRender ? Date.parse(state.lastRender) : 0)) needsRender = true;
       else {

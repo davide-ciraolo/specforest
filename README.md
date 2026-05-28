@@ -8,7 +8,7 @@
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"/></a>
   <img src="https://img.shields.io/badge/node-%3E%3D18-brightgreen.svg" alt="Node >=18"/>
-  <img src="https://img.shields.io/badge/tests-72%20passing-brightgreen.svg" alt="72 tests passing"/>
+  <img src="https://img.shields.io/badge/tests-104%20passing-brightgreen.svg" alt="104 tests passing"/>
 </p>
 
 ---
@@ -39,7 +39,7 @@ The CLI emits explicit `NEXT: <state>` markers (and embedded prompts) telling Cl
 ├── README.md           # this file
 ├── bin/cli.js          # entry point
 ├── src/                # commands + pure modules
-├── tests/              # 67 tests (node:test)
+├── tests/              # 104 tests (node:test)
 └── package.json
 ```
 
@@ -188,15 +188,18 @@ The `sync` command is idempotent and self-describing. Run it; it tells you what 
 | Command | Purpose |
 |---|---|
 | `init` | Create `specforest.config.yml`, `docs/specs/`, `docs/trees/`, `.specforest/`. |
-| `sync` | Orchestrator. Emits `NEXT: ingest`, `NEXT: islands`, `rendered: …`, or `NEXT: clean`. |
+| `sync [--recluster-islands]` | Orchestrator. Emits `NEXT: ingest`, `NEXT: islands`, `NEXT: incremental-islands`, `rendered: …`, or `NEXT: clean`. Default is **incremental** — existing islands are preserved; new top-level features go through `add-island` / `extend-island`. Pass `--recluster-islands` to force a full re-cluster via `commit-islands`. |
 | `scan` | Read-only stale report as JSON (no state writes). |
 | `ingest <spec-name>` | Reads tree JSON from stdin, validates, stores under `.specforest/trees/`. |
-| `commit-islands` | Reads islands JSON from stdin, validates, reconciles IDs, writes `.specforest/islands.json`. |
+| `commit-islands` | Reads islands JSON from stdin, validates, reconciles IDs, writes `.specforest/islands.json` (full re-cluster). |
+| `add-island` | Reads a **single-island** JSON from stdin and appends it; all existing islands stay byte-identical. Rejects cross-island edges and member overlaps. |
+| `extend-island <id-or-name>` | Reads `{addMembers, addDependencies}` from stdin and extends ONE existing island. Intra-island deps only; cross-island edges require `sync --recluster-islands`. |
 | `render` | Force regenerate `forest.md` + island MDs. |
 | `tree [<spec-name>] [--regenerate] [--print]` | Default: emit `.specforest/tree.txt` cache path (read with your editor / Read tool, not bash). `<spec-name>` slices a single spec to stdout. `--print` dumps full ASCII to stdout. `--regenerate` forces rebuild. Cache auto-refreshes on mutations. |
 | `status` | One-line per-island counters. |
 | `mark <spec>/<feature> <state>` | Set feature status: `todo` / `in_progress` / `blocked` / `done`. |
 | `implement <spec>/<feature> [--no-mark]` | Print specs-to-read + prerequisites + embedded prompt, and mark the target `in_progress`. |
+| `verify <spec>/<feature>` | **Read-only** check whether the target is already implemented in the codebase. Emits specs-to-read + prerequisites + a verify prompt (VERDICT / EVIDENCE / GAPS). Never mutates status; suggests a follow-up `mark` instead. |
 | `rehash [--dry-run]` | Resync `specHash` in state + trees to match on-disk bytes (no tree regen, no status touch). |
 
 ---
@@ -232,7 +235,9 @@ PROMPT for dashboard (use verbatim):
 …
 ```
 
-Claude reads each spec, emits tree JSON, pipes it through `ingest`, then re-runs `sync`. Next state:
+Claude reads each spec, emits tree JSON, pipes it through `ingest`, then re-runs `sync`. Next state depends on whether `islands.json` exists yet:
+
+**First run (no islands.json) — or `sync --recluster-islands`:**
 
 ```
 $ node .claude/skills/specforest/bin/cli.js sync
@@ -250,7 +255,26 @@ You are clustering the specforest into dependency islands.
 …
 ```
 
-Claude reads every tree, produces an islands JSON (connected-component clustering with `explicit-ref` / `semantic` edge labels), pipes it through `commit-islands`. Next:
+Claude reads every tree, produces an islands JSON (connected-component clustering with `explicit-ref` / `semantic` edge labels), pipes it through `commit-islands`.
+
+**Subsequent runs (incremental — the default):**
+
+```
+$ node .claude/skills/specforest/bin/cli.js sync
+NEXT: incremental-islands
+auto-pruned 1 orphan member(s) from existing islands
+existing islands: 2
+uncovered top-level features: 1
+  - billing/invoices
+
+For each uncovered feature, pipe ONE of:
+  - extend-island <id-or-name>   (add to an existing island, intra-island deps only)
+  - add-island                    (create a NEW island; existing islands stay byte-identical)
+Cross-island edges or member moves require: sync --recluster-islands
+…
+```
+
+Claude reads the existing `islands.json` plus the listed trees, then for each uncovered feature either pipes a single-island JSON through `add-island` or pipes `{addMembers, addDependencies}` through `extend-island <id-or-name>`. Orphan members (features deleted from specs) are auto-pruned. Next:
 
 ```
 $ node .claude/skills/specforest/bin/cli.js sync
@@ -309,6 +333,31 @@ After the work is done:
 $ node .claude/skills/specforest/bin/cli.js mark dashboard/widget-grid done
 marked dashboard/widget-grid → done
 ```
+
+### Verify a feature
+
+Symmetric to `implement`, but **read-only**. Use it to check whether a feature is already implemented in the codebase — useful for drift checks, picking up work landed via another PR, or sanity-checking `in_progress` features.
+
+```
+$ node .claude/skills/specforest/bin/cli.js verify dashboard/widget-grid
+NEXT: verify
+target: dashboard/widget-grid
+target-status: todo (no change)
+specs-to-read:
+  - docs/specs/dashboard.md
+  - docs/specs/auth.md
+prerequisites:
+  - auth/login  [todo]   ⚠ not done
+prompt: |
+  You are verifying whether a feature from the specforest is implemented in the codebase.
+  …
+  3. Report back with VERDICT (implemented | partially implemented | not implemented),
+     EVIDENCE (file paths + line numbers), and GAPS (anything missing).
+  4. Suggest the appropriate follow-up `mark` command. DO NOT run `mark` yourself
+     unless the user confirms.
+```
+
+`verify` never mutates status. After Claude reports the verdict, the user (or Claude on confirmation) runs the suggested `mark` command.
 
 ### Inspect
 
@@ -442,6 +491,8 @@ Claude is instructed (via the embedded `commit-islands` prompt) to:
 
 Island IDs are stable across runs: the CLI matches new island member-sets to previous IDs by largest overlap.
 
+**Incremental vs. full re-cluster:** by default `sync` keeps the existing `islands.json` byte-identical and routes any newly-added top-level features through `add-island` / `extend-island` (per-feature decisions made by Claude). Use `sync --recluster-islands` only when features must move between islands or when new cross-island edges are needed — re-clustering reshuffles island IDs (reconciled by member-overlap) and is more disruptive than additive flows.
+
 ---
 
 ## State, change detection, and progress preservation
@@ -456,9 +507,13 @@ Island IDs are stable across runs: the CLI matches new island member-sets to pre
 ## Driving with Claude
 
 Tell Claude any of:
-- `"sync the specforest"` / `"update the forest"` / `/specforest`
+- `"sync the specforest"` / `"update the forest"` / `/specforest` — incremental by default
+- `"re-cluster islands"` / `"rebuild islands from scratch"` / `/specforest-recluster` — runs `sync --recluster-islands`
+- `"add a new island"` / `/specforest-add-island`
+- `"extend an island"` / `"add feature to <island>"` / `/specforest-extend-island`
 - `"show the forest"` / `/specforest-tree`
 - `"implement <spec>/<feature>"` / `/specforest-implement <spec>/<feature>`
+- `"verify <spec>/<feature>"` / `"is <feature> already implemented?"` / `/specforest-verify <spec>/<feature>`
 - `"rehash specforest"` / `/specforest-rehash` — resync hashes after byte-only spec edits (CRLF, BOM, formatting)
 
 Claude consults `.claude/skills/specforest/SKILL.md` and walks the sync loop. The CLI's `NEXT: …` markers and embedded prompts are the contract — Claude doesn't need to memorize the schema.
@@ -467,7 +522,7 @@ Claude consults `.claude/skills/specforest/SKILL.md` and walks the sync loop. Th
 
 ## Testing
 
-The skill ships with 67 tests covering pure modules, IO, render, and end-to-end CLI subprocess flows.
+The skill ships with 104 tests covering pure modules, IO, render, and end-to-end CLI subprocess flows.
 
 ```bash
 cd .claude/skills/specforest

@@ -4,10 +4,13 @@ import { cmdScan } from "../src/commands/scan.js";
 import { cmdSync } from "../src/commands/sync.js";
 import { cmdIngest } from "../src/commands/ingest.js";
 import { cmdCommitIslands } from "../src/commands/commit-islands.js";
+import { cmdAddIsland } from "../src/commands/add-island.js";
+import { cmdExtendIsland } from "../src/commands/extend-island.js";
 import { cmdRender } from "../src/commands/render.js";
 import { cmdTree } from "../src/commands/tree.js";
 import { cmdMark } from "../src/commands/mark.js";
 import { cmdImplement } from "../src/commands/implement.js";
+import { cmdVerify } from "../src/commands/verify.js";
 import { cmdStatus } from "../src/commands/status.js";
 import { cmdRehash } from "../src/commands/rehash.js";
 
@@ -15,15 +18,22 @@ const HELP = `specforest — spec-driven feature forest
 
 Commands:
   init                                       create config + folders
-  sync                                       orchestrator; emits "NEXT: …"
+  sync [--recluster-islands]                 orchestrator; emits "NEXT: …".
+                                             default: incremental (preserve existing islands,
+                                             extend/add for new top-level features).
+                                             --recluster-islands forces a full re-cluster
+                                             (also used automatically if islands.json is absent).
   scan                                       read-only stale report (JSON)
   ingest <spec-name>                         stdin: tree JSON
-  commit-islands                             stdin: islands JSON
+  commit-islands                             stdin: islands JSON (full re-cluster)
+  add-island                                 stdin: single-island JSON (additive; preserves all existing islands)
+  extend-island <id-or-name>                 stdin: { addMembers, addDependencies } (extends ONE existing island; intra-island deps only)
   render                                     regenerate forest.md + island MDs
   tree [<spec-name>] [--regenerate] [--print]
                                              default: emit cache path for Read; --print dumps ASCII; --regenerate forces rebuild
   mark <spec>/<feature-path> <state>         set status: todo|in_progress|blocked|done
   implement <spec>/<feature-path> [--no-mark] guide implementation; mark in_progress
+  verify <spec>/<feature-path>               check if implemented; read-only, suggests follow-up mark
   status                                     one-line counters per island
   rehash [--dry-run]                         resync specHash to on-disk bytes (no tree regen)
 
@@ -46,10 +56,13 @@ const HANDLERS = {
   sync: cmdSync,
   ingest: cmdIngest,
   "commit-islands": cmdCommitIslands,
+  "add-island": cmdAddIsland,
+  "extend-island": cmdExtendIsland,
   render: cmdRender,
   tree: cmdTree,
   mark: cmdMark,
   implement: cmdImplement,
+  verify: cmdVerify,
   status: cmdStatus,
   rehash: cmdRehash,
 };

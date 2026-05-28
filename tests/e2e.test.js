@@ -548,6 +548,105 @@ test("spec collision in two folders is reported", async () => {
   assert.match(r.stderr, /auth/);
 });
 
+test("verify prints NEXT: verify block, lists prereqs, does not mutate status", async () => {
+  const root = await setupProject();
+  await writeSpec(root, "auth", "## login\n## logout\n");
+  await writeSpec(root, "dashboard", "## widget-grid\n");
+  await run(["ingest", "auth"], { cwd: root, input: JSON.stringify(TREE_AUTH) });
+  await run(["ingest", "dashboard"], { cwd: root, input: JSON.stringify(TREE_DASHBOARD) });
+  await run(["commit-islands"], { cwd: root, input: JSON.stringify(ISLANDS_OK) });
+
+  const r = await run(["verify", "dashboard/widget-grid"], { cwd: root });
+  assert.equal(r.code, 0, r.stderr);
+  assert.match(r.stdout, /NEXT: verify/);
+  assert.match(r.stdout, /target: dashboard\/widget-grid/);
+  assert.match(r.stdout, /target-status: todo \(no change\)/);
+  assert.match(r.stdout, /specs-to-read:/);
+  assert.match(r.stdout, /docs\/specs\/dashboard\.md/);
+  assert.match(r.stdout, /docs\/specs\/auth\.md/);
+  assert.match(r.stdout, /prerequisites:/);
+  assert.match(r.stdout, /auth\/login.*\[todo\].*not done/);
+  assert.match(r.stdout, /VERDICT:/);
+
+  // status must be unchanged
+  const tree = JSON.parse(await readFile(path.join(root, ".specforest", "trees", "dashboard.json"), "utf8"));
+  const wg = tree.features.find((f) => f.name === "widget-grid");
+  assert.equal(wg.status, "todo", "verify must not mutate status");
+});
+
+test("verify accepts a done target and reports current status without change", async () => {
+  const root = await setupProject();
+  await writeSpec(root, "auth", "## login\n## logout\n");
+  await writeSpec(root, "dashboard", "## widget-grid\n");
+  await run(["ingest", "auth"], { cwd: root, input: JSON.stringify(TREE_AUTH) });
+  await run(["ingest", "dashboard"], { cwd: root, input: JSON.stringify(TREE_DASHBOARD) });
+  await run(["commit-islands"], { cwd: root, input: JSON.stringify(ISLANDS_OK) });
+  await run(["mark", "auth/login", "done"], { cwd: root });
+
+  const r = await run(["verify", "auth/login"], { cwd: root });
+  assert.equal(r.code, 0, r.stderr);
+  assert.match(r.stdout, /NEXT: verify/);
+  assert.match(r.stdout, /target-status: done \(no change\)/);
+
+  const tree = JSON.parse(await readFile(path.join(root, ".specforest", "trees", "auth.json"), "utf8"));
+  const login = tree.features.find((f) => f.name === "login");
+  assert.equal(login.status, "done", "done status must survive verify");
+});
+
+test("verify with unknown feature errors with did-you-mean", async () => {
+  const root = await setupProject();
+  await writeSpec(root, "auth", "## login\n");
+  await run(["ingest", "auth"], { cwd: root, input: JSON.stringify({
+    spec: "auth",
+    features: [{ name: "login", source: "heading", originalHeading: "## login", status: "todo", children: [] }],
+  }) });
+  await run(["commit-islands"], { cwd: root, input: JSON.stringify({
+    generatedAt: "2026-05-18T00:00:00Z",
+    islands: [{ id: "isl_aaaaaa", name: "auth", members: [{ spec: "auth", feature: "login" }], dependencies: [] }],
+  }) });
+
+  const r = await run(["verify", "auth/lgoin"], { cwd: root });
+  assert.equal(r.code, 1);
+  assert.match(r.stderr, /did you mean "auth\/login"/);
+});
+
+test("verify on a sub-feature reports the full path and leaves status unchanged", async () => {
+  const root = await setupProject();
+  await writeSpec(root, "auth", "## login\n");
+  const tree = {
+    spec: "auth",
+    features: [
+      {
+        name: "login",
+        source: "heading",
+        originalHeading: "## login",
+        status: "todo",
+        children: [
+          { name: "remember-me", source: "implied", originalHeading: null, status: "todo", children: [] },
+        ],
+      },
+    ],
+  };
+  await run(["ingest", "auth"], { cwd: root, input: JSON.stringify(tree) });
+  await run(["commit-islands"], {
+    cwd: root,
+    input: JSON.stringify({
+      generatedAt: "2026-05-18T00:00:00Z",
+      islands: [{ id: "isl_aaaaaa", name: "auth", members: [{ spec: "auth", feature: "login" }], dependencies: [] }],
+    }),
+  });
+
+  const r = await run(["verify", "auth/remember-me"], { cwd: root });
+  assert.equal(r.code, 0, r.stderr);
+  assert.match(r.stdout, /target: auth\/login\/remember-me/);
+
+  const out = JSON.parse(await readFile(path.join(root, ".specforest", "trees", "auth.json"), "utf8"));
+  const login = out.features.find((f) => f.name === "login");
+  const rm = login.children.find((c) => c.name === "remember-me");
+  assert.equal(rm.status, "todo", "sub-feature status unchanged");
+  assert.equal(login.status, "todo", "parent status unchanged");
+});
+
 test("editing a spec marks it stale on next sync and progress survives rename-preserving ingest", async () => {
   const root = await setupProject();
   await writeSpec(root, "auth", "## login\n## logout\n");
