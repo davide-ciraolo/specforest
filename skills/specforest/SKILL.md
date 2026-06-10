@@ -25,7 +25,7 @@ Turn project specs into a forest of feature trees, cluster features into depende
 Always invoke the CLI from the project root:
 
 ```
-node .claude/skills/specforest/bin/cli.js <command> [args]
+node ${CLAUDE_PLUGIN_ROOT}/skills/specforest/bin/cli.js <command> [args]
 ```
 
 If you get `ENOENT_CONFIG` or "not found", run `init` first.
@@ -34,7 +34,7 @@ If you get `ENOENT_CONFIG` or "not found", run `init` first.
 
 Loop until you read `NEXT: clean`:
 
-1. Run `node .claude/skills/specforest/bin/cli.js sync` (add `--recluster-islands` if the user explicitly asked for a full re-cluster, or if cross-island moves / edges are needed).
+1. Run `node ${CLAUDE_PLUGIN_ROOT}/skills/specforest/bin/cli.js sync` (add `--recluster-islands` if the user explicitly asked for a full re-cluster, or if cross-island moves / edges are needed).
 2. Read stdout. Branch:
    - `NEXT: ingest` → see § Ingest step.
    - `NEXT: islands` → full re-cluster requested or first run; see § Islands step.
@@ -60,7 +60,7 @@ For EACH stale spec:
 3. Produce a tree JSON object.
 4. Pipe it to the CLI:
    ```
-   echo '<json>' | node .claude/skills/specforest/bin/cli.js ingest <spec-name>
+   echo '<json>' | node ${CLAUDE_PLUGIN_ROOT}/skills/specforest/bin/cli.js ingest <spec-name>
    ```
    (Use a shell heredoc or a temp file on Windows where echo escaping is awkward.)
 5. After all stale specs are ingested, loop back to step 1 of Sync flow.
@@ -101,7 +101,7 @@ You:
 3. Produce an islands JSON object.
 4. Pipe to:
    ```
-   echo '<json>' | node .claude/skills/specforest/bin/cli.js commit-islands
+   echo '<json>' | node ${CLAUDE_PLUGIN_ROOT}/skills/specforest/bin/cli.js commit-islands
    ```
 5. Loop back to step 1 of Sync flow.
 
@@ -156,13 +156,13 @@ You:
    - **(a) Extend** an existing island when the feature thematically belongs there:
      ```
      echo '{"addMembers":[{"spec":"...","feature":"..."}],"addDependencies":[...]}' | \
-       node .claude/skills/specforest/bin/cli.js extend-island <id-or-name>
+       node ${CLAUDE_PLUGIN_ROOT}/skills/specforest/bin/cli.js extend-island <id-or-name>
      ```
      Dependencies must stay WITHIN the target island.
    - **(b) Add a new island** when the feature is its own theme (or groups with other uncovered features):
      ```
      echo '{"name":"kebab-theme","members":[...],"dependencies":[...]}' | \
-       node .claude/skills/specforest/bin/cli.js add-island
+       node ${CLAUDE_PLUGIN_ROOT}/skills/specforest/bin/cli.js add-island
      ```
      The new island's members must not overlap any existing island.
 4. If the work needs cross-island edges or member moves → abort the incremental flow and re-run `sync --recluster-islands` instead.
@@ -189,7 +189,7 @@ Stdin schema (single object — NOT wrapped in `{islands:[...]}`):
 ```
 
 ```
-echo '<single-island-json>' | node .claude/skills/specforest/bin/cli.js add-island
+echo '<single-island-json>' | node ${CLAUDE_PLUGIN_ROOT}/skills/specforest/bin/cli.js add-island
 ```
 
 Rejected if: member already in another island, member references unknown feature, dependencies cross island boundary, id/name collide with an existing island. The `id` is auto-generated if omitted.
@@ -200,7 +200,7 @@ Standalone, additive: append members (and intra-island dependencies) to ONE exis
 
 ```
 echo '{"addMembers":[...],"addDependencies":[...]}' | \
-  node .claude/skills/specforest/bin/cli.js extend-island <id-or-name>
+  node ${CLAUDE_PLUGIN_ROOT}/skills/specforest/bin/cli.js extend-island <id-or-name>
 ```
 
 Rejected if: target island not found, member already in any island, member references unknown feature, dependency endpoint outside the target island after extension. For cross-island moves or edges, re-run `sync --recluster-islands`.
@@ -211,7 +211,7 @@ User asks to implement `<spec>/<feature>`:
 
 1. Run:
    ```
-   node .claude/skills/specforest/bin/cli.js implement <spec>/<feature>
+   node ${CLAUDE_PLUGIN_ROOT}/skills/specforest/bin/cli.js implement <spec>/<feature>
    ```
 2. Read the `NEXT: implement` block. It lists:
    - `specs-to-read`: full file paths. Read EVERY ONE in full (not excerpts).
@@ -223,11 +223,11 @@ User asks to implement `<spec>/<feature>`:
 4. After the user confirms, plan + implement following project rules (TDD, planner agent if complex, coding-standards / security / testing guardrails from `CLAUDE.md` and `GUIDELINES.md`).
 5. On completion:
    ```
-   node .claude/skills/specforest/bin/cli.js mark <spec>/<feature> done
+   node ${CLAUDE_PLUGIN_ROOT}/skills/specforest/bin/cli.js mark <spec>/<feature> done
    ```
 6. If paused / blocked:
    ```
-   node .claude/skills/specforest/bin/cli.js mark <spec>/<feature> blocked
+   node ${CLAUDE_PLUGIN_ROOT}/skills/specforest/bin/cli.js mark <spec>/<feature> blocked
    ```
    And explain to the user why.
 
@@ -237,7 +237,7 @@ User asks to verify `<spec>/<feature>` — i.e. check whether it is already impl
 
 1. Run:
    ```
-   node .claude/skills/specforest/bin/cli.js verify <spec>/<feature>
+   node ${CLAUDE_PLUGIN_ROOT}/skills/specforest/bin/cli.js verify <spec>/<feature>
    ```
    Accepts any current status (`todo` / `in_progress` / `blocked` / `done`). The command is **read-only** — it never mutates feature status.
 2. Read the `NEXT: verify` block. It lists:
@@ -251,7 +251,7 @@ User asks to verify `<spec>/<feature>` — i.e. check whether it is already impl
 5. Report back to the user with **VERDICT** (implemented | partially implemented | not implemented), **EVIDENCE** (concrete file paths + line numbers), and **GAPS** (anything missing).
 6. Suggest the matching follow-up `mark` command. Do NOT run `mark` yourself — the user (or the conversation) confirms first:
    ```
-   node .claude/skills/specforest/bin/cli.js mark <spec>/<feature> <done|in_progress|todo|blocked>
+   node ${CLAUDE_PLUGIN_ROOT}/skills/specforest/bin/cli.js mark <spec>/<feature> <done|in_progress|todo|blocked>
    ```
 
 ## Tree view
@@ -277,8 +277,8 @@ The cache (`.specforest/tree.txt`) is rewritten automatically by `sync` (after r
 Use when a spec's bytes changed but its features did NOT (line-ending normalization, BOM removal, reformatting). Patches `specHash` in `.specforest/state.json` and `.specforest/trees/*.json` to match on-disk bytes WITHOUT re-ingesting or touching trees, islands, or progress.
 
 ```
-node .claude/skills/specforest/bin/cli.js rehash            # apply
-node .claude/skills/specforest/bin/cli.js rehash --dry-run  # report only
+node ${CLAUDE_PLUGIN_ROOT}/skills/specforest/bin/cli.js rehash            # apply
+node ${CLAUDE_PLUGIN_ROOT}/skills/specforest/bin/cli.js rehash --dry-run  # report only
 ```
 
 If features actually changed, use the Sync flow instead — `rehash` will not regenerate trees from new headings.

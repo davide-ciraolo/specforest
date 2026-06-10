@@ -64,9 +64,46 @@ After `init`, the host project will look like:
 
 ## Install
 
-Requires **Node >= 18**. The skill is self-contained — copy the directory into your project, install two runtime deps, done. No npm registry publish.
+Requires **Node >= 18**.
 
-### 1. Drop the skill into your project
+### Recommended — Claude Code plugin marketplace
+
+```bash
+# Register marketplace (once per machine or via .claude/settings.json)
+/plugin marketplace add davide-ciraolo/specforest
+
+# Install plugin
+/plugin install specforest@specforest
+```
+
+Or commit per-project enable in `.claude/settings.json`:
+
+```json
+{
+  "extraKnownMarketplaces": {
+    "specforest": {
+      "source": { "source": "github", "repo": "davide-ciraolo/specforest" }
+    }
+  },
+  "enabledPlugins": {
+    "specforest@specforest": true
+  }
+}
+```
+
+Teammates cloning the repo open it in Claude Code → marketplace prompt → install once. Updates via `/plugin update`.
+
+Then initialise the project:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/skills/specforest/bin/cli.js" init
+```
+
+### Manual / vendored install (fallback for non–Claude Code tools)
+
+The skill is self-contained — copy the directory into your project, install two runtime deps, done. No npm registry publish.
+
+#### 1. Drop the skill into your project
 
 Pick one:
 

@@ -1,0 +1,13 @@
+{
+  "name": "specforest",
+  "version": "0.1.0",
+  "description": "Build, maintain, and consume a feature-tree forest with dependency islands and progress tracking from project specs.",
+  "author": {
+    "name": "davide-ciraolo",
+    "url": "https://github.com/davide-ciraolo"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/davide-ciraolo/specforest",
+  "repository": "https://github.com/davide-ciraolo/specforest",
+  "keywords": ["spec", "feature-tree", "planning", "tdd", "obsidian"]
+}
