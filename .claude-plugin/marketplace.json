@@ -1,0 +1,22 @@
+{
+  "name": "specforest",
+  "owner": {
+    "name": "davide-ciraolo",
+    "url": "https://github.com/davide-ciraolo"
+  },
+  "metadata": {
+    "description": "Spec-driven feature forest with dependency islands and progress tracking",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "specforest",
+      "source": "./",
+      "description": "Build, maintain, and consume a feature-tree forest with dependency islands and progress tracking from project specs.",
+      "version": "0.1.0",
+      "license": "MIT",
+      "homepage": "https://github.com/davide-ciraolo/specforest",
+      "keywords": ["spec", "feature-tree", "planning", "tdd", "obsidian"]
+    }
+  ]
+}
