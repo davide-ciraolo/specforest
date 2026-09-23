@@ -10,9 +10,11 @@ import { cmdRender } from "../src/commands/render.js";
 import { cmdTree } from "../src/commands/tree.js";
 import { cmdMark } from "../src/commands/mark.js";
 import { cmdImplement } from "../src/commands/implement.js";
+import { cmdCi } from "../src/commands/ci.js";
 import { cmdVerify } from "../src/commands/verify.js";
 import { cmdStatus } from "../src/commands/status.js";
 import { cmdRehash } from "../src/commands/rehash.js";
+import { cmdTimings } from "../src/commands/timings.js";
 
 const HELP = `specforest — spec-driven feature forest
 
@@ -33,8 +35,12 @@ Commands:
                                              default: emit cache path for Read; --print dumps ASCII; --regenerate forces rebuild
   mark <spec>/<feature-path> <state>         set status: todo|in_progress|blocked|done
   implement <spec>/<feature-path> [--no-mark] guide implementation; mark in_progress
+  ci <spec>/<feature-path> -- <cmd>…         run a CI command (test/lint/format/typecheck/build)
+                                             and charge its wall-clock to that leaf
   verify <spec>/<feature-path>               check if implemented; read-only, suggests follow-up mark
   status                                     one-line counters per island
+  timings [<spec>/<feature-path>] [--json] [--orphans]
+                                             recorded time: forest + island rollup, or one node's detail
   rehash [--dry-run]                         resync specHash to on-disk bytes (no tree regen)
 
 Feature paths may target leaves (or any sub-feature):
@@ -62,8 +68,10 @@ const HANDLERS = {
   tree: cmdTree,
   mark: cmdMark,
   implement: cmdImplement,
+  ci: cmdCi,
   verify: cmdVerify,
   status: cmdStatus,
+  timings: cmdTimings,
   rehash: cmdRehash,
 };
 
