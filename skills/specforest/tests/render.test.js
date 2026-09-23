@@ -281,3 +281,46 @@ test("findIslandForFeature locates", () => {
   assert.equal(findIslandForFeature(islands, "s", "x").id, "isl_a");
   assert.equal(findIslandForFeature(islands, "s", "y"), null);
 });
+
+test("syncCheckboxes reports adopted transitions with full paths", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "sf-sync-transitions-"));
+  try {
+    const outputDir = path.join(dir, "out");
+    const treesDir = path.join(dir, "trees");
+    await mkdir(outputDir, { recursive: true });
+    await mkdir(treesDir, { recursive: true });
+
+    const tree = {
+      spec: "auth",
+      specPath: "docs/specs/auth.md",
+      specHash: "sha256:x",
+      features: [
+        {
+          name: "login", source: "heading", originalHeading: "## login", status: "in_progress",
+          children: [{ name: "form", source: "implied", originalHeading: null, status: "in_progress", children: [] }],
+        },
+      ],
+    };
+    await writeFile(path.join(treesDir, "auth.json"), JSON.stringify(tree, null, 2) + "\n", "utf8");
+
+    // The MD must be newer than the tree for its checkboxes to win.
+    await new Promise((r) => setTimeout(r, 20));
+    await writeFile(
+      path.join(outputDir, "auth-island.md"),
+      "### From [[auth]]\n\n- [/] login\n  - [x] form\n",
+      "utf8",
+    );
+
+    const r = await syncCheckboxes(outputDir, treesDir, defaultMarkers());
+    assert.equal(r.transitions.length, 1);
+    assert.deepEqual(r.transitions[0], {
+      spec: "auth",
+      fullPath: "login/form",
+      from: "in_progress",
+      to: "done",
+      isLeaf: true,
+    });
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
