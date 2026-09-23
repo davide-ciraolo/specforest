@@ -12,6 +12,7 @@ import {
   isTreeCacheStale,
   regenAndWriteTreeCache,
   extractSpecBlockFromCache,
+  buildTimingAnnotator,
 } from "../tree-cache.js";
 
 export async function cmdTree({ cwd, args, stdout, stderr }) {
@@ -23,7 +24,7 @@ export async function cmdTree({ cwd, args, stdout, stderr }) {
 
   if (specArg) {
     const cached = await readTreeCache(p);
-    if (cached && !regenerate && !(await isTreeCacheStale(p))) {
+    if (cached && !regenerate && !(await isTreeCacheStale(p, config))) {
       const sliced = extractSpecBlockFromCache(cached, specArg, config.checkboxMarkers);
       if (sliced != null) {
         stdout.write(sliced + "\n");
@@ -35,6 +36,9 @@ export async function cmdTree({ cwd, args, stdout, stderr }) {
       treesDir: p.treesDir,
       statePath: p.state,
       markers: config.checkboxMarkers,
+      timingsPath: p.timings,
+      timingsEnabled: config.timings,
+      stderr,
     });
     const islands = await readIslands(p.islands);
     if (!islands) {
@@ -44,7 +48,8 @@ export async function cmdTree({ cwd, args, stdout, stderr }) {
     const trees = await readAllTrees(p.treesDir);
     const treesBySpec = new Map(trees.map((t) => [t.spec, t]));
     const built = buildForestStructure(islands.islands, treesBySpec);
-    const ascii = renderSingleSpecAscii(specArg, built, markerFn(config.checkboxMarkers));
+    const annotate = await buildTimingAnnotator({ config, p, trees, islands, stderr });
+    const ascii = renderSingleSpecAscii(specArg, built, markerFn(config.checkboxMarkers), annotate);
     if (!ascii) {
       stderr.write(`spec "${specArg}" not found\n`);
       return 1;
@@ -56,12 +61,12 @@ export async function cmdTree({ cwd, args, stdout, stderr }) {
   let ascii;
   if (!regenerate) {
     const cached = await readTreeCache(p);
-    if (cached && !(await isTreeCacheStale(p))) {
+    if (cached && !(await isTreeCacheStale(p, config))) {
       ascii = cached;
     }
   }
   if (ascii == null) {
-    ascii = await regenAndWriteTreeCache({ config, p });
+    ascii = await regenAndWriteTreeCache({ config, p, stderr });
     if (ascii == null) {
       stderr.write("no islands.json yet; run `specforest sync` first\n");
       return 1;
