@@ -16,7 +16,7 @@ async function readAllStdin(stdin) {
 export async function cmdCommitIslands({ cwd, stdin, stdout, stderr }) {
   const config = await loadConfig(cwd);
   const p = paths(cwd, config);
-  await syncCheckboxesAndPersistOrphans({ outputDir: p.outputDir, treesDir: p.treesDir, statePath: p.state, markers: config.checkboxMarkers });
+  await syncCheckboxesAndPersistOrphans({ outputDir: p.outputDir, treesDir: p.treesDir, statePath: p.state, markers: config.checkboxMarkers, timingsPath: p.timings, timingsEnabled: config.timings, stderr });
 
   const raw = await readAllStdin(stdin);
   let parsed;
@@ -81,7 +81,7 @@ export async function cmdCommitIslands({ cwd, stdin, stdout, stderr }) {
   await writeIslands(p.islands, out);
   const structHash = structuralFingerprint(trees);
   await updateState(p.state, (s) => { s.lastClusteredStructure = structHash; });
-  try { await regenAndWriteTreeCache({ config, p }); } catch {}
+  try { await regenAndWriteTreeCache({ config, p, stderr }); } catch {}
   stdout.write(`committed ${reconciled.length} island(s); covered ${memberKeys.length} top-level features\n`);
   return 0;
 }

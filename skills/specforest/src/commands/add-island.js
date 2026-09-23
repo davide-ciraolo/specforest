@@ -57,6 +57,9 @@ export async function cmdAddIsland({ cwd, args, stdin, stdout, stderr }) {
     treesDir: p.treesDir,
     statePath: p.state,
     markers: config.checkboxMarkers,
+    timingsPath: p.timings,
+    timingsEnabled: config.timings,
+    stderr,
   });
 
   const raw = await readAllStdin(stdin);
@@ -171,7 +174,7 @@ export async function cmdAddIsland({ cwd, args, stdin, stdout, stderr }) {
   }
 
   await writeIslands(p.islands, merged);
-  try { await regenAndWriteTreeCache({ config, p }); } catch {}
+  try { await regenAndWriteTreeCache({ config, p, stderr }); } catch {}
 
   const totalCovered = new Set();
   for (const isl of merged.islands) for (const m of isl.members) totalCovered.add(`${m.spec}/${m.feature}`);

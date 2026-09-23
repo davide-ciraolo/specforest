@@ -16,6 +16,7 @@ export function paths(projectRoot, config) {
     lock: path.join(hidden, "sync.lock"),
     forestMd: path.join(projectRoot, config.outputDir, "forest.md"),
     treeCache: path.join(hidden, "tree.txt"),
+    timings: path.join(hidden, "timings.jsonl"),
   };
 }
 

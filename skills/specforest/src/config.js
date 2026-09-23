@@ -15,6 +15,7 @@ export function defaultConfig() {
     maxDepth: 2,
     wikilinkStyle: "obsidian",
     checkboxMarkers: defaultMarkers(),
+    timings: true,
   };
 }
 
@@ -32,6 +33,7 @@ checkboxMarkers:
   in_progress: "/"
   blocked: "-"
   done: "x"
+timings: true
 `;
 }
 
@@ -57,6 +59,7 @@ export function validateConfig(c) {
   if (!Array.isArray(c.ignore)) throw new Error("config.ignore must be array");
   if (typeof c.maxDepth !== "number" || c.maxDepth < 1) throw new Error("config.maxDepth must be >= 1");
   if (c.wikilinkStyle !== "obsidian") throw new Error(`config.wikilinkStyle must be 'obsidian' (got ${c.wikilinkStyle})`);
+  if (typeof c.timings !== "boolean") throw new Error("config.timings must be a boolean");
   validateMarkers(c.checkboxMarkers);
   return c;
 }

@@ -22,7 +22,7 @@ export async function cmdIngest({ cwd, args, stdin, stdout, stderr }) {
   }
   const config = await loadConfig(cwd);
   const p = paths(cwd, config);
-  await syncCheckboxesAndPersistOrphans({ outputDir: p.outputDir, treesDir: p.treesDir, statePath: p.state, markers: config.checkboxMarkers });
+  await syncCheckboxesAndPersistOrphans({ outputDir: p.outputDir, treesDir: p.treesDir, statePath: p.state, markers: config.checkboxMarkers, timingsPath: p.timings, timingsEnabled: config.timings, stderr });
 
   const raw = await readAllStdin(stdin);
   let parsed;

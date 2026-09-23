@@ -16,6 +16,8 @@ Turn project specs into a forest of feature trees, cluster features into depende
 - "show the forest" / "what's in the forest" / `/specforest-tree` → **Tree-view flow** (§ Tree view). Do not write. Pass `--regenerate` to force rebuild.
 - "implement \<spec\>/\<feature\>" / "let's build \<feature\>" / `/specforest-implement` → **Implement flow** (§ Implement).
 - "verify \<spec\>/\<feature\>" / "is \<feature\> already implemented?" / "check if \<feature\> is done" / `/specforest-verify` → **Verify flow** (§ Verify).
+- Running tests / lint / format / typecheck for a feature → wrap it: `ci <spec>/<feature> -- <command>`. This is what separates CI time from coding time.
+- "how long did X take" / "show timings" / `/specforest-timings` → **Timings flow**: `timings [<spec>/<feature>]`.
 - User edited spec files and wants the trees current → **Sync flow**.
 - User ticked checkboxes in Obsidian and wants ASCII tree refreshed → run `tree` (it syncs checkboxes first).
 - "rehash specforest" / "resync hashes" / `/specforest-rehash` → **Rehash flow** (§ Rehash). Use when spec bytes changed but feature content did not (CRLF flip, BOM fix, reformatting).
@@ -221,11 +223,20 @@ User asks to implement `<spec>/<feature>`:
    - Surface the list to the user. Ask: proceed anyway, implement prerequisites first, or abort.
    - DO NOT silently proceed past undone prereqs.
 4. After the user confirms, plan + implement following project rules (TDD, planner agent if complex, coding-standards / security / testing guardrails from `CLAUDE.md` and `GUIDELINES.md`).
-5. On completion:
+5. Run every verification command through the `ci` wrapper while the feature is `in_progress`, so its time is charged to this feature:
+   ```
+   node ${CLAUDE_PLUGIN_ROOT}/skills/specforest/bin/cli.js ci <spec>/<feature> -- <test-or-lint-command>
+   ```
+   See § Timings for which commands to wrap.
+6. On completion:
    ```
    node ${CLAUDE_PLUGIN_ROOT}/skills/specforest/bin/cli.js mark <spec>/<feature> done
    ```
-6. If paused / blocked:
+   Marking a feature `done` also marks all of its sub-features `done`. Marking the
+   last outstanding sub-feature `done` promotes the parent automatically. Marking a
+   sub-feature `in_progress` promotes its parent to `in_progress`. Timing follows
+   status, so you do not need to mark parents by hand.
+7. If paused / blocked:
    ```
    node ${CLAUDE_PLUGIN_ROOT}/skills/specforest/bin/cli.js mark <spec>/<feature> blocked
    ```
@@ -283,6 +294,49 @@ node ${CLAUDE_PLUGIN_ROOT}/skills/specforest/bin/cli.js rehash --dry-run  # repo
 
 If features actually changed, use the Sync flow instead — `rehash` will not regenerate trees from new headings.
 
+## Timings
+
+Specforest records how long each leaf feature took, split into CI time and coding time.
+Recording is on by default (`timings: true` in the config).
+
+**The CI category rule.** Route through the `ci` wrapper any command that **verifies**
+code rather than changes it: test runners, linters, formatters (including write modes),
+type checkers, and builds run for verification. Do **not** wrap: editing, file
+inspection, git operations, package installs, or running the application itself.
+
+There is no config list and no auto-detection. This rule is the whole definition, and it
+must work in a repo you have never seen — apply it to whatever build tooling the project
+actually uses.
+
+```
+node ${CLAUDE_PLUGIN_ROOT}/skills/specforest/bin/cli.js ci <spec>/<feature-path> -- <command> [args…]
+```
+
+The wrapped command's output streams through live, and `ci` exits with the wrapped
+command's exit code — so a failing check still surfaces as a failure. A failing check
+still records its time; failed CI is time spent.
+
+Only childless nodes are timed. If the target has sub-features, `ci` still runs the
+command but records nothing and says so on stderr — target the leaf you are actually
+working on.
+
+**Reading the numbers:**
+
+```
+node ${CLAUDE_PLUGIN_ROOT}/skills/specforest/bin/cli.js timings                        # forest + per-island rollup
+node ${CLAUDE_PLUGIN_ROOT}/skills/specforest/bin/cli.js timings <spec>/<feature-path>  # one node, with intervals and ci runs
+node ${CLAUDE_PLUGIN_ROOT}/skills/specforest/bin/cli.js timings --json                 # raw milliseconds
+node ${CLAUDE_PLUGIN_ROOT}/skills/specforest/bin/cli.js timings --orphans              # time recorded against targets no longer in any tree
+```
+
+`status` and the ASCII `tree` also carry timing suffixes, on lines that have recorded
+time. The Obsidian Markdown files carry none.
+
+**Two different figures, both reported:**
+
+- **lead** — calendar time from first start to last finish. Includes nights and weekends.
+- **active** — summed `in_progress` intervals, split into **ci** and **coding**.
+
 ## Pitfalls + rules
 
 - **Never ingest a sub-feature directly.** Top-level features only as nodes; sub-features live under them. The Islands prompt hoists sub-feature edges to their parent.
@@ -296,6 +350,8 @@ If features actually changed, use the Sync flow instead — `rehash` will not re
 - **`verify` is read-only.** It never writes status. After reporting the verdict, suggest the appropriate `mark` follow-up; only run `mark` once the user confirms.
 - **Wholesale regen.** `forest.md` and island MDs are projections of the JSON state. Never hand-edit them — your edits will be overwritten on next render. To edit progress: tick checkboxes (Obsidian-style markers; CLI parses them back).
 - **Don't paraphrase the embedded prompts.** Use the CLI's printed prompt verbatim; this SKILL.md's prompt section is a reference, the CLI's stdout is the source of truth for any given run.
+- **`ci` always needs an explicit target.** There is no inference from "whatever is currently `in_progress`" — a guessed attribution is worse than none. Pass the same `<spec>/<feature-path>` you passed to `implement`.
+- **`ci` runs through the platform shell.** That is `cmd.exe` on Windows and `/bin/sh` elsewhere, not necessarily the shell the operator is using. Plain commands (`make check-all`, `npm test`, `pytest`, `cargo clippy`) work everywhere; anything relying on shell-specific syntax needs an explicit `bash -c "…"`.
 
 ## Config
 
@@ -310,8 +366,10 @@ ignore: []
 maxDepth: 2
 wikilinkStyle: obsidian
 checkboxMarkers: { todo: " ", in_progress: "/", blocked: "-", done: "x" }
+timings: true
 ```
 
 ## See also
 
 - Design spec: `docs/superpowers/specs/2026-05-18-specforest-skill-design.md`
+- Timings spec: `dev/specs/2026-09-21-feature-timings-design.md`

@@ -43,6 +43,9 @@ export async function cmdSync({ cwd, args, stdout, stderr }) {
       treesDir: scan.paths.treesDir,
       statePath: scan.paths.state,
       markers: scan.config.checkboxMarkers,
+      timingsPath: scan.paths.timings,
+      timingsEnabled: scan.config.timings,
+      stderr,
     });
 
     if (scan.stale.length) {
@@ -236,7 +239,7 @@ export async function cmdSync({ cwd, args, stdout, stderr }) {
         }
         s.islandIdMap = map;
       });
-      try { await regenAndWriteTreeCache({ config: scan.config, p: scan.paths }); } catch {}
+      try { await regenAndWriteTreeCache({ config: scan.config, p: scan.paths, stderr }); } catch {}
       stdout.write(`rendered: forest.md + ${islands.islands.length} island MD(s) at ${scan.paths.outputDir}\n`);
       return 0;
     }

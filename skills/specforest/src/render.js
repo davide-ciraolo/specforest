@@ -116,7 +116,7 @@ export async function syncCheckboxes(outputDir, treesDir, markers) {
   try {
     mdFiles = (await readdir(outputDir)).filter((f) => f.endsWith(".md") && f !== "forest.md");
   } catch (e) {
-    if (e.code === "ENOENT") return { updated: [], warnings: [], orphans: [] };
+    if (e.code === "ENOENT") return { updated: [], warnings: [], orphans: [], transitions: [] };
     throw e;
   }
 
@@ -153,6 +153,7 @@ export async function syncCheckboxes(outputDir, treesDir, markers) {
 
   const updated = [];
   const orphans = [];
+  const transitions = [];
   let treeFiles;
   try {
     treeFiles = (await readdir(treesDir)).filter((f) => f.endsWith(".json"));
@@ -167,7 +168,8 @@ export async function syncCheckboxes(outputDir, treesDir, markers) {
     const raw = await readFile(fp, "utf8");
     const tree = JSON.parse(raw);
     let mutated = false;
-    function visit(node) {
+    function visit(node, pathSegs) {
+      const segs = [...pathSegs, node.name];
       const key = `${tree.spec}/${node.name}`;
       if (statusByFeature.has(key)) {
         // MD wins only if the MD file is newer than tree.json. Otherwise the tree.json
@@ -176,14 +178,21 @@ export async function syncCheckboxes(outputDir, treesDir, markers) {
         const adoptMd = mdMtime > treeStat.mtimeMs;
         const s = statusByFeature.get(key);
         if (adoptMd && node.status !== s) {
+          transitions.push({
+            spec: tree.spec,
+            fullPath: segs.join("/"),
+            from: node.status,
+            to: s,
+            isLeaf: !node.children || node.children.length === 0,
+          });
           node.status = s;
           mutated = true;
         }
         statusByFeature.delete(key);
       }
-      for (const c of node.children || []) visit(c);
+      for (const c of node.children || []) visit(c, segs);
     }
-    for (const tf of tree.features) visit(tf);
+    for (const tf of tree.features) visit(tf, []);
     if (mutated) {
       await writeFile(fp, JSON.stringify(tree, null, 2) + "\n", "utf8");
       updated.push(tree.spec);
@@ -194,7 +203,7 @@ export async function syncCheckboxes(outputDir, treesDir, markers) {
     orphans.push({ key, status });
   }
 
-  return { updated, warnings, orphans };
+  return { updated, warnings, orphans, transitions };
 }
 
 async function locateTreeBySpecBasename(treesDir, basename) {

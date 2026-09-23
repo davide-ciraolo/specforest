@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
+import { mkdtemp, rm, writeFile, mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { defaultConfig, loadConfig, writeDefaultConfig, validateConfig } from "../src/config.js";
@@ -18,6 +18,7 @@ import {
   findParentTopLevel,
 } from "../src/tree-io.js";
 import { reconcileIds, newIslandId, readIslands, writeIslands } from "../src/islands-io.js";
+import { recordTransitions } from "../src/timings-io.js";
 
 async function tmpProject() {
   return mkdtemp(path.join(tmpdir(), "sf-test-"));
@@ -66,6 +67,51 @@ test("paths derives all keys", () => {
   assert.ok(p.specsDir.includes("docs/specs") || p.specsDir.includes("docs\\specs"));
   assert.ok(p.hiddenDir.endsWith(".specforest"));
   assert.ok(p.treesDir.endsWith(path.join(".specforest", "trees")));
+});
+
+test("timings defaults to true and survives a config without the key", async () => {
+  const dir = await tmpProject();
+  try {
+    await writeFile(
+      path.join(dir, "specforest.config.yml"),
+      "specsDir: docs/specs\noutputDir: docs/trees\nhiddenDir: .specforest\n",
+      "utf8",
+    );
+    const c = await loadConfig(dir);
+    assert.equal(c.timings, true);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("explicit timings: false in a config file survives the merge", async () => {
+  const dir = await tmpProject();
+  try {
+    await writeFile(
+      path.join(dir, "specforest.config.yml"),
+      "specsDir: docs/specs\noutputDir: docs/trees\nhiddenDir: .specforest\ntimings: false\n",
+      "utf8",
+    );
+    const c = await loadConfig(dir);
+    assert.equal(c.timings, false);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("timings must be a boolean and can be disabled", async () => {
+  const dir = await tmpProject();
+  try {
+    await writeDefaultConfig(dir);
+    const c = await loadConfig(dir);
+    assert.equal(c.timings, true);
+    const p = paths("/proj", c);
+    assert.ok(p.timings.endsWith(path.join(".specforest", "timings.jsonl")));
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+  assert.throws(() => validateConfig({ ...defaultConfig(), timings: "yes" }), /timings must be a boolean/);
+  assert.ok(validateConfig({ ...defaultConfig(), timings: false }));
 });
 
 test("state roundtrip", async () => {
@@ -264,6 +310,55 @@ test("readIslands missing → null; writeIslands → readIslands", async () => {
     await writeIslands(p, isl);
     const back = await readIslands(p);
     assert.deepEqual(back, isl);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+// --- recordTransitions (plural) — timings design §2.4 ---
+//
+// A cascade is one logical event: every crossing it produces must land in a
+// single append, so a crash cannot leave a half-written cascade behind.
+
+test("recordTransitions writes every crossing in one append", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "rt-"));
+  const log = path.join(dir, "timings.jsonl");
+  try {
+    const written = await recordTransitions({
+      enabled: true,
+      timingsPath: log,
+      changes: [
+        { fullPath: "auth/login/form", from: "todo", to: "in_progress" },
+        { fullPath: "auth/login", from: "todo", to: "in_progress" },
+        { fullPath: "auth/other", from: "todo", to: "done" }, // no crossing
+      ],
+      source: "cli",
+      ts: "2026-09-23T10:00:00.000Z",
+    });
+    assert.equal(written.length, 2);
+    const lines = (await readFile(log, "utf8")).trim().split("\n");
+    assert.equal(lines.length, 2);
+    assert.equal(JSON.parse(lines[0]).target, "auth/login/form");
+    assert.equal(JSON.parse(lines[1]).target, "auth/login");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("recordTransitions writes nothing when disabled", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "rt-"));
+  const log = path.join(dir, "timings.jsonl");
+  try {
+    assert.deepEqual(
+      await recordTransitions({
+        enabled: false,
+        timingsPath: log,
+        changes: [{ fullPath: "a/b", from: "todo", to: "in_progress" }],
+        source: "cli",
+      }),
+      [],
+    );
+    await assert.rejects(readFile(log, "utf8"));
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
