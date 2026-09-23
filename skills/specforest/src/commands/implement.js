@@ -9,6 +9,7 @@ import { regenAndWriteTreeCache } from "../tree-cache.js";
 import { parseTarget, resolveTargetNode } from "../target.js";
 import { rollupAncestors } from "../rollup.js";
 import { pickMatch } from "../disambiguate.js";
+import { recordTransitions } from "../timings-io.js";
 
 export async function cmdImplement({ cwd, args, stdin, stdout, stderr }) {
   const target = args.find((a) => !a.startsWith("--"));
@@ -25,7 +26,7 @@ export async function cmdImplement({ cwd, args, stdin, stdout, stderr }) {
   const { spec: specName, segments } = parsed;
   const config = await loadConfig(cwd);
   const p = paths(cwd, config);
-  await syncCheckboxesAndPersistOrphans({ outputDir: p.outputDir, treesDir: p.treesDir, statePath: p.state, markers: config.checkboxMarkers });
+  await syncCheckboxesAndPersistOrphans({ outputDir: p.outputDir, treesDir: p.treesDir, statePath: p.state, markers: config.checkboxMarkers, timingsPath: p.timings, timingsEnabled: config.timings, stderr });
 
   const islands = await readIslands(p.islands);
   if (!islands) {
@@ -56,20 +57,26 @@ export async function cmdImplement({ cwd, args, stdin, stdout, stderr }) {
   const targetNode = resolved.node;
   const topLevel = resolved.topLevel;
   const fullPath = resolved.fullPath;
+  // Key off the as-stored `ownTree.spec`, never the user-typed `specName`:
+  // readTree resolves `${specName}.json` case-insensitively on Windows/macOS,
+  // but islands.json members, the island adjacency keys and every timings
+  // reader are all canonical, so a typed "AUTH/login" would miss the island
+  // lookup, reach nothing in the graph, and record an orphan timing target.
+  const canonicalSpec = ownTree.spec;
 
   if (targetNode.status === "done") {
-    stderr.write(`feature already done; run \`specforest mark ${specName}/${fullPath} todo\` first to reopen\n`);
+    stderr.write(`feature already done; run \`specforest mark ${canonicalSpec}/${fullPath} todo\` first to reopen\n`);
     return 1;
   }
 
-  const island = findIslandForFeature(islands.islands, specName, topLevel.name);
+  const island = findIslandForFeature(islands.islands, canonicalSpec, topLevel.name);
   if (!island) {
     stderr.write(`feature not present in any island (islands.json out of date?). run \`specforest sync\` first\n`);
     return 1;
   }
 
   const adj = buildAdjacency(island);
-  const startKey = `${specName}/${topLevel.name}`;
+  const startKey = `${canonicalSpec}/${topLevel.name}`;
   const visited = new Set();
   const reachedOrder = [];
   const cycleNotes = [];
@@ -105,7 +112,7 @@ export async function cmdImplement({ cwd, args, stdin, stdout, stderr }) {
   const hasUndone = prerequisites.some((pr) => pr.status !== "done");
   const specsToRead = [...specsToReadSet];
 
-  const fullTarget = `${specName}/${fullPath}`;
+  const fullTarget = `${canonicalSpec}/${fullPath}`;
   const lines = [];
   lines.push("NEXT: implement");
   lines.push(`target: ${fullTarget}`);
@@ -139,15 +146,38 @@ export async function cmdImplement({ cwd, args, stdin, stdout, stderr }) {
 
   let rolled = [];
   if (!noMark && targetNode.status !== "in_progress") {
+    const previousStatus = targetNode.status;
     targetNode.status = "in_progress";
     rolled = rollupAncestors(ownTree, targetNode);
     await writeTree(p.treesDir, ownTree);
-    try { await regenAndWriteTreeCache({ config, p }); } catch {}
+    // Append the event BEFORE regenerating the cache. The other order writes a
+    // cache that knowingly omits the transition that caused it, leaving
+    // freshness to rest entirely on isTreeCacheStale's strict `m > cacheMt`: if
+    // both writes land in the same mtime tick the cache is judged fresh and the
+    // just-started feature shows no "(running)" annotation until some unrelated
+    // write bumps an input.
+    // `implement` only ever sets in_progress, so there is no `done` cascade
+    // here — just the target plus any ancestor the rollup promoted (spec §2.4).
+    const changes = [
+      { node: targetNode, fullPath, from: previousStatus, to: "in_progress" },
+      ...rolled,
+    ];
+    try {
+      await recordTransitions({
+        enabled: config.timings,
+        timingsPath: p.timings,
+        changes: changes.map((c) => ({ ...c, fullPath: `${canonicalSpec}/${c.fullPath}` })),
+        source: "cli",
+      });
+    } catch (e) {
+      stderr.write(`warning: could not record timing: ${e.message}\n`);
+    }
+    try { await regenAndWriteTreeCache({ config, p, stderr }); } catch {}
   }
 
   stdout.write(lines.join("\n") + "\n");
   for (const r of rolled) {
-    stdout.write(`rollup: ${specName}/${r.name} ${r.from} → ${r.to}\n`);
+    stdout.write(`rollup: ${canonicalSpec}/${r.name} ${r.from} → ${r.to}\n`);
   }
 
   return 0;

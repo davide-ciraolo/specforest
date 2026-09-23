@@ -10,7 +10,7 @@ import { syncCheckboxesAndPersistOrphans } from "../sync-helpers.js";
 export async function cmdRender({ cwd, stdout, stderr }) {
   const config = await loadConfig(cwd);
   const p = paths(cwd, config);
-  await syncCheckboxesAndPersistOrphans({ outputDir: p.outputDir, treesDir: p.treesDir, statePath: p.state, markers: config.checkboxMarkers });
+  await syncCheckboxesAndPersistOrphans({ outputDir: p.outputDir, treesDir: p.treesDir, statePath: p.state, markers: config.checkboxMarkers, timingsPath: p.timings, timingsEnabled: config.timings, stderr });
   const islands = await readIslands(p.islands);
   if (!islands) {
     stderr.write("no islands.json yet; run `specforest sync` first\n");
