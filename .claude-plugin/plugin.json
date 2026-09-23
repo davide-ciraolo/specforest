@@ -1,6 +1,6 @@
 {
   "name": "specforest",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Build, maintain, and consume a feature-tree forest with dependency islands and progress tracking from project specs.",
   "author": {
     "name": "davide-ciraolo",
